@@ -69,10 +69,16 @@ const CREATE_TABLES_SQL = `
     host TEXT NOT NULL,
     deviceId TEXT,
     status TEXT NOT NULL DEFAULT 'offline',
+    statusReason TEXT,
+    statusChangedAt INTEGER,
     capabilities TEXT NOT NULL DEFAULT '[]',
     lastSeenAt INTEGER,
     tokenPrefix TEXT NOT NULL,
     tokenHash TEXT NOT NULL,
+    currentBotTaskId TEXT,
+    onboardedAt INTEGER,
+    version TEXT,
+    autoUpdate INTEGER NOT NULL DEFAULT 0,
     createdAt INTEGER NOT NULL,
     updatedAt INTEGER NOT NULL
   );
@@ -105,6 +111,37 @@ const CREATE_TABLES_SQL = `
     userId TEXT REFERENCES users(id),
     action TEXT NOT NULL,
     metadata TEXT NOT NULL DEFAULT '{}',
+    createdAt INTEGER NOT NULL
+  );
+
+  CREATE TABLE botLogs (
+    id TEXT PRIMARY KEY,
+    botId TEXT NOT NULL REFERENCES bots(id),
+    workspaceId TEXT NOT NULL REFERENCES workspaces(id),
+    level TEXT NOT NULL DEFAULT 'info',
+    message TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    botTaskId TEXT REFERENCES botTasks(id),
+    createdAt INTEGER NOT NULL
+  );
+
+  CREATE TABLE botGuidelines (
+    id TEXT PRIMARY KEY,
+    workspaceId TEXT NOT NULL REFERENCES workspaces(id),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL
+  );
+
+  CREATE TABLE botReleaseNotes (
+    id TEXT PRIMARY KEY,
+    workspaceId TEXT NOT NULL REFERENCES workspaces(id),
+    version TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    releaseUrl TEXT,
     createdAt INTEGER NOT NULL
   );
 `;

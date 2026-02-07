@@ -120,14 +120,21 @@ describe("Bots — registerBotSchema validation", () => {
 
 describe("Bots — botHeartbeatSchema validation", () => {
   it("accepts valid heartbeat", () => {
-    const result = botHeartbeatSchema.safeParse({ status: "online" });
+    const result = botHeartbeatSchema.safeParse({ status: "idle" });
     expect(result.success).toBe(true);
   });
 
   it("accepts all valid statuses", () => {
-    for (const status of ["online", "offline", "busy", "error"]) {
+    for (const status of ["offline", "idle", "working", "waiting", "error", "recovering"]) {
       const result = botHeartbeatSchema.safeParse({ status });
       expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects legacy statuses", () => {
+    for (const status of ["online", "busy"]) {
+      const result = botHeartbeatSchema.safeParse({ status });
+      expect(result.success).toBe(false);
     }
   });
 
@@ -136,9 +143,25 @@ describe("Bots — botHeartbeatSchema validation", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts optional statusReason", () => {
+    const result = botHeartbeatSchema.safeParse({
+      status: "error",
+      statusReason: "Out of memory",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts optional version", () => {
+    const result = botHeartbeatSchema.safeParse({
+      status: "idle",
+      version: "1.2.3",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects extra fields (strict mode)", () => {
     const result = botHeartbeatSchema.safeParse({
-      status: "online",
+      status: "idle",
       extra: true,
     });
     expect(result.success).toBe(false);
@@ -338,7 +361,8 @@ describe("Bots — bot registration and heartbeat logic", () => {
         workspaceId,
         name: "Test Bot",
         host: "localhost:9090",
-        status: "online",
+        status: "idle",
+        statusChangedAt: now,
         capabilities: JSON.stringify(["code", "test"]),
         lastSeenAt: now,
         tokenPrefix,
@@ -357,7 +381,7 @@ describe("Bots — bot registration and heartbeat logic", () => {
     expect(bot).toBeDefined();
     expect(bot!.name).toBe("Test Bot");
     expect(bot!.host).toBe("localhost:9090");
-    expect(bot!.status).toBe("online");
+    expect(bot!.status).toBe("idle");
     expect(bot!.tokenPrefix).toBe("bbbbbbbb");
     expect(JSON.parse(bot!.capabilities)).toEqual(["code", "test"]);
     expect(await compare(deviceToken, bot!.tokenHash)).toBe(true);
@@ -374,7 +398,8 @@ describe("Bots — bot registration and heartbeat logic", () => {
         workspaceId,
         name: "Heartbeat Bot",
         host: "localhost:9090",
-        status: "online",
+        status: "idle",
+        statusChangedAt: now,
         capabilities: "[]",
         lastSeenAt: now,
         tokenPrefix: "abcd1234",
@@ -384,12 +409,12 @@ describe("Bots — bot registration and heartbeat logic", () => {
       })
       .run();
 
-    // Simulate heartbeat with status update
+    // Simulate heartbeat with status update (idle → working)
     const newNow = Date.now();
     const res = db
       .update(schema.bots)
       .set({
-        status: "busy",
+        status: "working",
         lastSeenAt: newNow,
         updatedAt: newNow,
       })
@@ -409,7 +434,7 @@ describe("Bots — bot registration and heartbeat logic", () => {
       .where(eq(schema.bots.id, botId))
       .get();
 
-    expect(updated!.status).toBe("busy");
+    expect(updated!.status).toBe("working");
     expect(updated!.lastSeenAt).toBe(newNow);
   });
 
@@ -417,7 +442,7 @@ describe("Bots — bot registration and heartbeat logic", () => {
     const res = db
       .update(schema.bots)
       .set({
-        status: "online",
+        status: "idle",
         lastSeenAt: Date.now(),
         updatedAt: Date.now(),
       })
@@ -443,7 +468,8 @@ describe("Bots — bot registration and heartbeat logic", () => {
         workspaceId,
         name: "WS1 Bot",
         host: "localhost",
-        status: "online",
+        status: "idle",
+        statusChangedAt: now,
         capabilities: "[]",
         lastSeenAt: now,
         tokenPrefix: "abcd1234",
@@ -457,7 +483,7 @@ describe("Bots — bot registration and heartbeat logic", () => {
     const otherWorkspaceId = crypto.randomUUID();
     const res = db
       .update(schema.bots)
-      .set({ status: "busy", lastSeenAt: Date.now(), updatedAt: Date.now() })
+      .set({ status: "working", lastSeenAt: Date.now(), updatedAt: Date.now() })
       .where(
         and(
           eq(schema.bots.id, botId),
@@ -468,12 +494,12 @@ describe("Bots — bot registration and heartbeat logic", () => {
 
     expect(res.changes).toBe(0);
 
-    // Bot should still be "online"
+    // Bot should still be "idle"
     const bot = db
       .select()
       .from(schema.bots)
       .where(eq(schema.bots.id, botId))
       .get();
-    expect(bot!.status).toBe("online");
+    expect(bot!.status).toBe("idle");
   });
 });

@@ -2,11 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
-import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { bots } from "@/lib/db/schema";
 import { botHeartbeatSchema } from "@/lib/validators";
 import { getBotAuthContext } from "@/lib/server/bot-auth";
+import { transitionBotStatus } from "@/lib/server/bot-state-machine";
 
 export const runtime = "nodejs";
 
@@ -29,22 +29,39 @@ export async function POST(
     const body = await req.json();
     const data = botHeartbeatSchema.parse(body);
 
-    const now = Date.now();
-
-    const res = db
-      .update(bots)
-      .set({ status: data.status, lastSeenAt: now, updatedAt: now })
+    // Fetch current bot status
+    const bot = db
+      .select({ status: bots.status })
+      .from(bots)
       .where(and(eq(bots.id, botId), eq(bots.workspaceId, botCtx.workspaceId)))
-      .run();
+      .get();
 
-    if (!res.changes) return jsonError(404, "Bot not found");
+    if (!bot) return jsonError(404, "Bot not found");
 
-    logAudit({
-      workspaceId: botCtx.workspaceId,
-      userId: null,
-      action: "bot.heartbeat",
-      metadata: { botId, status: data.status },
-    });
+    // Attempt state transition
+    const result = transitionBotStatus(
+      db,
+      botId,
+      botCtx.workspaceId,
+      bot.status,
+      data.status,
+      data.statusReason,
+    );
+
+    if (!result.ok) {
+      return jsonError(409, result.error, {
+        allowedTransitions: result.allowedTransitions,
+      });
+    }
+
+    // Persist version if provided
+    if (data.version) {
+      const now = Date.now();
+      db.update(bots)
+        .set({ version: data.version, updatedAt: now })
+        .where(and(eq(bots.id, botId), eq(bots.workspaceId, botCtx.workspaceId)))
+        .run();
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
@@ -54,4 +71,3 @@ export async function POST(
     return jsonError(400, "Invalid JSON body");
   }
 }
-

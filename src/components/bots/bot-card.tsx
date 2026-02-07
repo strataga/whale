@@ -13,10 +13,16 @@ type BotLike = {
 
 function statusStyles(status?: string | null) {
   switch (status) {
-    case "online":
+    case "idle":
+    case "online": // legacy
       return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
-    case "busy":
-      return "border-yellow-400/30 bg-yellow-400/10 text-yellow-200";
+    case "working":
+    case "busy": // legacy
+      return "border-blue-400/30 bg-blue-400/10 text-blue-200";
+    case "waiting":
+      return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+    case "recovering":
+      return "border-purple-400/30 bg-purple-400/10 text-purple-200";
     case "error":
       return "border-rose-400/30 bg-rose-400/10 text-rose-200";
     case "offline":

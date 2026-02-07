@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { bots, botTasks, projects, tasks } from "@/lib/db/schema";
+import { bots, botGuidelines, botTasks, projects, tasks } from "@/lib/db/schema";
 import { getBotAuthContext } from "@/lib/server/bot-auth";
 
 export const runtime = "nodejs";
@@ -27,6 +27,25 @@ export async function GET(
     .set({ lastSeenAt: Date.now() })
     .where(and(eq(bots.id, botId), eq(bots.workspaceId, botCtx.workspaceId)))
     .run();
+
+  // Check if bot needs onboarding
+  const bot = db
+    .select({ onboardedAt: bots.onboardedAt })
+    .from(bots)
+    .where(and(eq(bots.id, botId), eq(bots.workspaceId, botCtx.workspaceId)))
+    .get();
+
+  if (bot && bot.onboardedAt === null) {
+    const guidelineCount = db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(botGuidelines)
+      .where(eq(botGuidelines.workspaceId, botCtx.workspaceId))
+      .get();
+
+    if ((guidelineCount?.count ?? 0) > 0) {
+      return NextResponse.json({ onboardingRequired: true, botTasks: [] });
+    }
+  }
 
   const rows = db
     .select({

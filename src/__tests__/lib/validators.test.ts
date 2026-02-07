@@ -536,14 +536,21 @@ describe("updateUserRoleSchema", () => {
 // ---------------------------------------------------------------------------
 describe("botHeartbeatSchema", () => {
   it("accepts valid statuses", () => {
-    for (const status of ["online", "offline", "busy", "error"]) {
+    for (const status of ["offline", "idle", "working", "waiting", "error", "recovering"]) {
       const result = botHeartbeatSchema.safeParse({ status });
       expect(result.success).toBe(true);
     }
   });
 
+  it("rejects legacy statuses", () => {
+    for (const status of ["online", "busy"]) {
+      const result = botHeartbeatSchema.safeParse({ status });
+      expect(result.success).toBe(false);
+    }
+  });
+
   it("rejects invalid status", () => {
-    const result = botHeartbeatSchema.safeParse({ status: "idle" });
+    const result = botHeartbeatSchema.safeParse({ status: "sleeping" });
     expect(result.success).toBe(false);
   });
 
@@ -553,8 +560,17 @@ describe("botHeartbeatSchema", () => {
   });
 
   it("rejects unknown fields (strict mode)", () => {
-    const result = botHeartbeatSchema.safeParse({ status: "online", uptime: 100 });
+    const result = botHeartbeatSchema.safeParse({ status: "idle", uptime: 100 });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts optional statusReason and version", () => {
+    const result = botHeartbeatSchema.safeParse({
+      status: "idle",
+      statusReason: "Ready",
+      version: "1.0.0",
+    });
+    expect(result.success).toBe(true);
   });
 });
 

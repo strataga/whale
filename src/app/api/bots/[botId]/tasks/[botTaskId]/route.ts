@@ -4,7 +4,7 @@ import { ZodError } from "zod";
 
 import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { botTasks } from "@/lib/db/schema";
+import { bots, botTasks } from "@/lib/db/schema";
 import { getBotAuthContext } from "@/lib/server/bot-auth";
 import { updateBotTaskSchema } from "@/lib/validators";
 
@@ -77,6 +77,19 @@ export async function PATCH(
       .set(next)
       .where(and(eq(botTasks.id, botTaskId), eq(botTasks.botId, botId)))
       .run();
+
+    // Update bot's currentBotTaskId based on task status
+    if (patch.status === "running") {
+      db.update(bots)
+        .set({ currentBotTaskId: botTaskId, updatedAt: now })
+        .where(eq(bots.id, botId))
+        .run();
+    } else if (patch.status === "completed" || patch.status === "failed") {
+      db.update(bots)
+        .set({ currentBotTaskId: null, updatedAt: now })
+        .where(eq(bots.id, botId))
+        .run();
+    }
 
     const updated = db
       .select()

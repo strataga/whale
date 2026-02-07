@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, desc, eq, sql } from "drizzle-orm";
 
+import { BotActivityLog } from "@/components/bots/bot-activity-log";
 import { BotTaskStatus } from "@/components/bots/bot-task-status";
 import { RevokeBotButton } from "@/components/bots/revoke-bot-button";
 import { db } from "@/lib/db";
@@ -13,10 +14,16 @@ export const runtime = "nodejs";
 
 function statusStyles(status?: string | null) {
   switch (status) {
-    case "online":
+    case "idle":
+    case "online": // legacy
       return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
-    case "busy":
-      return "border-yellow-400/30 bg-yellow-400/10 text-yellow-200";
+    case "working":
+    case "busy": // legacy
+      return "border-blue-400/30 bg-blue-400/10 text-blue-200";
+    case "waiting":
+      return "border-amber-400/30 bg-amber-400/10 text-amber-200";
+    case "recovering":
+      return "border-purple-400/30 bg-purple-400/10 text-purple-200";
     case "error":
       return "border-rose-400/30 bg-rose-400/10 text-rose-200";
     case "offline":
@@ -69,16 +76,25 @@ export default async function BotDetailPage({
   const ctx = await requireAuthContext();
   const isAdmin = !checkRole(ctx, "admin");
 
-  db.update(bots)
-    .set({ status: "offline", updatedAt: sql`(strftime('%s','now') * 1000)` })
-    .where(
-      and(
-        eq(bots.workspaceId, ctx.workspaceId),
-        eq(bots.status, "online"),
-        sql`${bots.lastSeenAt} < (strftime('%s','now') * 1000 - 5 * 60 * 1000)`,
-      ),
-    )
-    .run();
+  // Mark stale active bots as offline
+  const staleStatuses = ["idle", "working", "waiting", "online", "busy"];
+  for (const s of staleStatuses) {
+    db.update(bots)
+      .set({
+        status: "offline",
+        statusReason: "Stale: no heartbeat",
+        statusChangedAt: sql`(strftime('%s','now') * 1000)`,
+        updatedAt: sql`(strftime('%s','now') * 1000)`,
+      })
+      .where(
+        and(
+          eq(bots.workspaceId, ctx.workspaceId),
+          eq(bots.status, s),
+          sql`${bots.lastSeenAt} < (strftime('%s','now') * 1000 - 5 * 60 * 1000)`,
+        ),
+      )
+      .run();
+  }
 
   const bot = db
     .select({
@@ -86,8 +102,12 @@ export default async function BotDetailPage({
       name: bots.name,
       host: bots.host,
       status: bots.status,
+      statusReason: bots.statusReason,
       capabilities: bots.capabilities,
       lastSeenAt: bots.lastSeenAt,
+      version: bots.version,
+      onboardedAt: bots.onboardedAt,
+      currentBotTaskId: bots.currentBotTaskId,
       createdAt: bots.createdAt,
     })
     .from(bots)
@@ -95,6 +115,18 @@ export default async function BotDetailPage({
     .get();
 
   if (!bot) notFound();
+
+  // Look up current task title if bot is working on something
+  let currentTaskTitle: string | null = null;
+  if (bot.currentBotTaskId) {
+    const currentBotTask = db
+      .select({ taskTitle: tasks.title })
+      .from(botTasks)
+      .innerJoin(tasks, eq(botTasks.taskId, tasks.id))
+      .where(eq(botTasks.id, bot.currentBotTaskId))
+      .get();
+    currentTaskTitle = currentBotTask?.taskTitle ?? null;
+  }
 
   const recentBotTasks = db
     .select({
@@ -145,14 +177,24 @@ export default async function BotDetailPage({
             </p>
           </div>
 
-          <span
-            className={cn(
-              "inline-flex shrink-0 items-center rounded-full border px-2 py-1 text-xs font-semibold",
-              statusStyles(bot.status),
-            )}
-          >
-            {bot.status ?? "offline"}
-          </span>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold",
+                statusStyles(bot.status),
+              )}
+            >
+              {bot.status ?? "offline"}
+            </span>
+            {currentTaskTitle ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/30 bg-blue-400/10 px-2 py-1 text-xs font-medium text-blue-200">
+                Working on: {currentTaskTitle}
+              </span>
+            ) : null}
+            {bot.statusReason ? (
+              <span className="text-xs text-muted-foreground">{bot.statusReason}</span>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -239,6 +281,8 @@ export default async function BotDetailPage({
           </div>
         )}
       </section>
+
+      <BotActivityLog botId={bot.id} />
     </div>
   );
 }

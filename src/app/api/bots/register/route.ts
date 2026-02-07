@@ -98,11 +98,13 @@ export async function POST(req: Request) {
         name: data.name,
         host: data.host,
         deviceId: data.deviceId,
-        status: "online",
+        status: "idle",
+        statusChangedAt: now,
         capabilities: JSON.stringify(data.capabilities ?? []),
         lastSeenAt: now,
         tokenPrefix,
         tokenHash,
+        version: data.version ?? null,
       })
       .run();
 

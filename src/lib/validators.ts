@@ -52,7 +52,14 @@ export const createMilestoneSchema = z.object({
   dueDate: z.number().int().positive().optional(),
 });
 
-export const botStatusSchema = z.enum(["online", "offline", "busy", "error"]);
+export const botStatusSchema = z.enum([
+  "offline",
+  "idle",
+  "working",
+  "waiting",
+  "error",
+  "recovering",
+]);
 
 export const botTaskStatusSchema = z.enum([
   "pending",
@@ -72,6 +79,7 @@ export const registerBotSchema = z
     host: z.string().trim().min(1).max(500),
     deviceId: z.string().trim().min(1).max(200),
     capabilities: z.array(z.string().trim().min(1).max(100)).max(100).default([]),
+    version: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 
@@ -94,6 +102,8 @@ export const updateBotTaskSchema = z
 export const botHeartbeatSchema = z
   .object({
     status: botStatusSchema,
+    statusReason: z.string().trim().max(500).optional(),
+    version: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 
@@ -108,5 +118,41 @@ export const inviteUserSchema = z
 export const updateUserRoleSchema = z
   .object({
     role: z.enum(["admin", "member", "viewer"]),
+  })
+  .strict();
+
+// Bot activity logs (whale-tfv)
+export const botLogLevelSchema = z.enum(["info", "warn", "error", "debug"]);
+
+export const createBotLogSchema = z
+  .object({
+    level: botLogLevelSchema.optional().default("info"),
+    message: z.string().trim().min(1).max(5000),
+    metadata: z.record(z.string(), z.unknown()).optional().default({}),
+    botTaskId: z.string().uuid().optional(),
+  })
+  .strict();
+
+// Bot onboarding guidelines (whale-wqk)
+export const createBotGuidelineSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    content: z.string().trim().min(1).max(10000),
+  })
+  .strict();
+
+export const ackOnboardingSchema = z
+  .object({
+    acknowledged: z.literal(true),
+  })
+  .strict();
+
+// Bot release notes (whale-fyj)
+export const createReleaseNoteSchema = z
+  .object({
+    version: z.string().trim().min(1).max(100),
+    title: z.string().trim().min(1).max(200),
+    body: z.string().trim().min(1).max(10000),
+    releaseUrl: z.string().url().max(2000).optional(),
   })
   .strict();

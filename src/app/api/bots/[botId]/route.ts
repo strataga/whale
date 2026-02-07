@@ -29,8 +29,14 @@ export async function GET(
       name: bots.name,
       host: bots.host,
       status: bots.status,
+      statusReason: bots.statusReason,
+      statusChangedAt: bots.statusChangedAt,
       capabilities: bots.capabilities,
       lastSeenAt: bots.lastSeenAt,
+      currentBotTaskId: bots.currentBotTaskId,
+      onboardedAt: bots.onboardedAt,
+      version: bots.version,
+      autoUpdate: bots.autoUpdate,
       createdAt: bots.createdAt,
       updatedAt: bots.updatedAt,
     })
@@ -89,8 +95,16 @@ export async function DELETE(
   const tokenPrefix = raw.slice(0, 8);
   const tokenHash = await hash(raw, 10);
 
+  const now = Date.now();
   db.update(bots)
-    .set({ tokenPrefix, tokenHash, status: "offline", updatedAt: Date.now() })
+    .set({
+      tokenPrefix,
+      tokenHash,
+      status: "offline",
+      statusReason: "Token revoked",
+      statusChangedAt: now,
+      updatedAt: now,
+    })
     .where(and(eq(bots.id, bot.id), eq(bots.workspaceId, ctx.workspaceId)))
     .run();
 
