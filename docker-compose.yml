@@ -1,0 +1,19 @@
+services:
+  whale:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - whale-data:/app/data
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=/app/data/whale.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-to-a-random-string}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required for production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  whale-data:

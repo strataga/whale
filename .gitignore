@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# env files (keep .env.example)
+.env
+.env.*.local
+
+# local database
+*.db
+*.db-*
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# typescript
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.vscode/

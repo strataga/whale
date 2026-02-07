@@ -18,5 +18,8 @@ Whale is an open-source, AI-first project planner and organizer that integrates 
 - Minimal friction: no heavy configuration.
 - Traceable: clear decisions, progress, and next actions.
 
+## Security
+See `docs/SECURITY.md` for encryption, bot signing, and IP allowlist configuration.
+
 ## Next Steps
 See `docs/plan.md`.
