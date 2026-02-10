@@ -20,6 +20,9 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# local dev helper state
+.dev-next.json
+
 # typescript
 *.tsbuildinfo
 
