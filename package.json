@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev-next-autoport.mjs",
+    "dev:status": "node scripts/dev-status.mjs",
+    "dev:stop": "node scripts/dev-stop.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
