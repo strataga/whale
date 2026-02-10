@@ -1,14 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 
 import { useToast } from "@/components/ui/toast";
 
 type ApiError = { error?: string };
 
 export function ReleaseForm() {
-  const router = useRouter();
   const { toast } = useToast();
 
   const [pending, setPending] = React.useState(false);
@@ -52,7 +50,6 @@ export function ReleaseForm() {
     setPending(false);
     toast("Release note created.", "success");
     form.reset();
-    router.refresh();
   }
 
   return (

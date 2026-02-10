@@ -4,8 +4,10 @@ import { ZodError } from "zod";
 
 import { logAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { bots, botTasks } from "@/lib/db/schema";
+import { bots, botTasks, botTaskEvents, tasks } from "@/lib/db/schema";
 import { getBotAuthContext } from "@/lib/server/bot-auth";
+import { maybeRetryBotTask } from "@/lib/server/bot-task-retry";
+import { settleX402TransactionsForTask } from "@/lib/server/x402-task-settlement";
 import { updateBotTaskSchema } from "@/lib/validators";
 
 export const runtime = "nodejs";
@@ -67,6 +69,14 @@ export async function PATCH(
       next.artifactLinks = JSON.stringify(patch.artifactLinks);
     }
 
+    if (patch.outputData !== undefined) {
+      next.outputData = JSON.stringify(patch.outputData);
+    }
+
+    if (patch.queuePosition !== undefined) {
+      next.queuePosition = patch.queuePosition;
+    }
+
     if (!Object.keys(next).length) {
       return jsonError(400, "No fields to update");
     }
@@ -91,6 +101,87 @@ export async function PATCH(
         .run();
     }
 
+    // #39 Record timeline event for status changes
+    if (patch.status !== undefined) {
+      db.insert(botTaskEvents)
+        .values({
+          id: crypto.randomUUID(),
+          botTaskId,
+          event: `status.${patch.status}`,
+          metadata: JSON.stringify({ from: existing.status }),
+          createdAt: now,
+        })
+        .run();
+    }
+
+    // #2 Auto-retry on failure
+    let retryResult: { retried: boolean; newTaskId?: string } | null = null;
+    if (patch.status === "failed" && existing.maxRetries > 0) {
+      retryResult = maybeRetryBotTask(
+        db,
+        {
+          id: botTaskId,
+          botId,
+          taskId: existing.taskId,
+          retryCount: existing.retryCount,
+          maxRetries: existing.maxRetries,
+          timeoutMinutes: existing.timeoutMinutes,
+          botGroupId: existing.botGroupId,
+          structuredSpec: existing.structuredSpec,
+        },
+        botCtx.workspaceId,
+      );
+    }
+
+    // Trigger handoffs on completion (#13)
+    if (patch.status === "completed") {
+      const { taskHandoffs } = await import("@/lib/db/schema");
+      const handoffs = db
+        .select()
+        .from(taskHandoffs)
+        .where(eq(taskHandoffs.fromBotTaskId, botTaskId))
+        .all();
+
+      for (const h of handoffs) {
+        const payload = JSON.parse(h.contextPayload || "{}");
+        payload._sourceOutput = patch.outputSummary ?? "";
+        db.update(taskHandoffs)
+          .set({ contextPayload: JSON.stringify(payload) })
+          .where(eq(taskHandoffs.id, h.id))
+          .run();
+      }
+    }
+
+    // If bot work completed successfully, reflect into the parent task when no approval is required.
+    // Also settle any x402 payments linked to the task.
+    if (patch.status === "completed") {
+      const parent = db
+        .select({ status: tasks.status, requiresApproval: tasks.requiresApproval })
+        .from(tasks)
+        .where(eq(tasks.id, existing.taskId))
+        .get();
+
+      if (parent && parent.status !== "done" && parent.requiresApproval === 0) {
+        db.update(tasks)
+          .set({ status: "done", updatedAt: now })
+          .where(eq(tasks.id, existing.taskId))
+          .run();
+      }
+
+      // Settle payments once the task is effectively "done" or doesn't require review gates.
+      if (!parent || parent.requiresApproval === 0 || parent.status === "done") {
+        const settled = settleX402TransactionsForTask(db, botCtx.workspaceId, existing.taskId);
+        if (settled > 0) {
+          logAudit({
+            workspaceId: botCtx.workspaceId,
+            userId: null,
+            action: "x402_transaction.settled",
+            metadata: { taskId: existing.taskId, count: settled, botId, botTaskId },
+          });
+        }
+      }
+    }
+
     const updated = db
       .select()
       .from(botTasks)
@@ -109,7 +200,10 @@ export async function PATCH(
       },
     });
 
-    return NextResponse.json({ botTask: updated });
+    return NextResponse.json({
+      botTask: updated,
+      ...(retryResult?.retried ? { retry: { newTaskId: retryResult.newTaskId } } : {}),
+    });
   } catch (err) {
     if (err instanceof ZodError) {
       return jsonError(400, "Invalid request body", err.issues);
@@ -117,4 +211,3 @@ export async function PATCH(
     return jsonError(400, "Invalid JSON body");
   }
 }
-

@@ -1,118 +1,80 @@
-import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+"use client";
 
-import { db } from "@/lib/db";
-import { users, workspaces } from "@/lib/db/schema";
-import { getActiveProvider, type AIProvider } from "@/lib/ai";
-import { decrypt, encrypt, isEncrypted } from "@/lib/crypto";
-import { requireAuthContext, checkRole } from "@/lib/server/auth-context";
+import { useState } from "react";
 
-export const runtime = "nodejs";
+import { TwoFactorSetup } from "@/components/settings/two-factor-setup";
+import { SessionsList } from "@/components/settings/sessions-list";
+import { useCRPC } from "@/lib/convex/crpc";
 
-async function updateWorkspace(formData: FormData) {
-  "use server";
+export default function SettingsPage() {
+  const crpc = useCRPC();
+  const workspaceQuery = crpc.workspaces.get.useQuery({});
+  const userQuery = crpc.users.me.useQuery({});
 
-  const ctx = await requireAuthContext();
-  const roleCheck = checkRole(ctx, "admin");
-  if (roleCheck) return; // silently reject — server action can't return errors easily
+  const updateWorkspaceMutation = crpc.workspaces.update.useMutation();
+  const updateProfileMutation = crpc.users.updateMe.useMutation();
 
-  const { workspaceId } = ctx;
+  const [wsName, setWsName] = useState("");
+  const [wsTimezone, setWsTimezone] = useState("");
+  const [wsIpAllowlist, setWsIpAllowlist] = useState("");
+  const [aiProvider, setAiProvider] = useState("openai");
+  const [aiApiKey, setAiApiKey] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [initialized, setInitialized] = useState(false);
 
-  const name = String(formData.get("workspaceName") ?? "").trim();
-  const timezone = String(formData.get("timezone") ?? "").trim();
-  const ipAllowlist = String(formData.get("ipAllowlist") ?? "").trim();
-
-  if (!name) return;
-  if (!timezone) return;
-
-  db.update(workspaces)
-    .set({
-      name,
-      timezone,
-      ipAllowlist: ipAllowlist ? ipAllowlist : null,
-      updatedAt: Date.now(),
-    })
-    .where(eq(workspaces.id, workspaceId))
-    .run();
-
-  revalidatePath("/dashboard/settings");
-}
-
-async function updateAIProvider(formData: FormData) {
-  "use server";
-
-  const ctx = await requireAuthContext();
-  const aiRoleCheck = checkRole(ctx, "admin");
-  if (aiRoleCheck) return;
-
-  const { workspaceId } = ctx;
-
-  const provider = String(formData.get("aiProvider") ?? "").trim();
-  const apiKey = String(formData.get("aiApiKey") ?? "").trim();
-
-  const validProviders: AIProvider[] = ["openai", "anthropic", "google"];
-  if (!validProviders.includes(provider as AIProvider)) return;
-
-  // Only update the key if the user provided a new one (empty = keep existing)
-  const updateFields: Record<string, unknown> = { aiProvider: provider, updatedAt: Date.now() };
-  if (apiKey) {
-    updateFields.aiApiKey = encrypt(apiKey);
+  // Initialize form values from queries
+  if (!initialized && workspaceQuery.data && userQuery.data) {
+    const ws = workspaceQuery.data as any;
+    const user = userQuery.data as any;
+    setWsName(ws.name ?? "");
+    setWsTimezone(ws.timezone ?? "UTC");
+    setWsIpAllowlist(ws.ipAllowlist ?? "");
+    setAiProvider(ws.aiProvider ?? "openai");
+    setProfileName(user.name ?? "");
+    setInitialized(true);
   }
 
-  db.update(workspaces)
-    .set(updateFields)
-    .where(eq(workspaces.id, workspaceId))
-    .run();
+  if (workspaceQuery.isPending || userQuery.isPending) {
+    return (
+      <div className="space-y-8">
+        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="h-64 animate-pulse rounded-2xl bg-muted" />
+          <div className="h-64 animate-pulse rounded-2xl bg-muted" />
+        </div>
+      </div>
+    );
+  }
 
-  revalidatePath("/dashboard/settings");
-}
+  const user = userQuery.data as any;
 
-async function updateProfile(formData: FormData) {
-  "use server";
-
-  const { userId } = await requireAuthContext();
-
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return;
-
-  db.update(users).set({ name }).where(eq(users.id, userId)).run();
-
-  revalidatePath("/dashboard/settings");
-}
-
-export default async function SettingsPage() {
-  const ctx = await requireAuthContext();
-
-  const workspace = db
-    .select({
-      name: workspaces.name,
-      timezone: workspaces.timezone,
-      aiProvider: workspaces.aiProvider,
-      aiApiKey: workspaces.aiApiKey,
-      ipAllowlist: workspaces.ipAllowlist,
-    })
-    .from(workspaces)
-    .where(eq(workspaces.id, ctx.workspaceId))
-    .get();
-
-  // Never send the full API key to the client — mask it
-  const decryptedKey =
-    workspace?.aiApiKey && isEncrypted(workspace.aiApiKey) ? decrypt(workspace.aiApiKey) : workspace?.aiApiKey;
-  const maskedKey = decryptedKey ? `••••${decryptedKey.slice(-4)}` : "";
-
-  const user = db
-    .select({ name: users.name, email: users.email })
-    .from(users)
-    .where(eq(users.id, ctx.userId))
-    .get();
-
-  const active = getActiveProvider(ctx.workspaceId);
-
-  const providerLabels: Record<AIProvider, string> = {
+  const providerLabels: Record<string, string> = {
     openai: "OpenAI",
     anthropic: "Anthropic",
     google: "Google Gemini",
   };
+
+  async function handleSaveWorkspace(e: React.FormEvent) {
+    e.preventDefault();
+    await updateWorkspaceMutation.mutateAsync({
+      name: wsName,
+      timezone: wsTimezone,
+      ipAllowlist: wsIpAllowlist || undefined,
+    });
+  }
+
+  async function handleSaveAI(e: React.FormEvent) {
+    e.preventDefault();
+    await updateWorkspaceMutation.mutateAsync({
+      aiProvider,
+      aiApiKey: aiApiKey || undefined,
+    });
+  }
+
+  async function handleSaveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    await updateProfileMutation.mutateAsync({ name: profileName });
+  }
 
   return (
     <div className="space-y-8">
@@ -130,15 +92,15 @@ export default async function SettingsPage() {
             Name and timezone are used for planning and daily summaries.
           </p>
 
-          <form action={updateWorkspace} className="mt-6 space-y-4">
+          <form onSubmit={handleSaveWorkspace} className="mt-6 space-y-4">
             <div className="space-y-2">
               <label htmlFor="workspaceName" className="text-sm font-medium">
                 Workspace name
               </label>
               <input
                 id="workspaceName"
-                name="workspaceName"
-                defaultValue={workspace?.name ?? ""}
+                value={wsName}
+                onChange={(e) => setWsName(e.target.value)}
                 required
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               />
@@ -150,8 +112,8 @@ export default async function SettingsPage() {
               </label>
               <input
                 id="timezone"
-                name="timezone"
-                defaultValue={workspace?.timezone ?? "UTC"}
+                value={wsTimezone}
+                onChange={(e) => setWsTimezone(e.target.value)}
                 required
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 placeholder="America/Los_Angeles"
@@ -167,8 +129,8 @@ export default async function SettingsPage() {
               </label>
               <textarea
                 id="ipAllowlist"
-                name="ipAllowlist"
-                defaultValue={workspace?.ipAllowlist ?? ""}
+                value={wsIpAllowlist}
+                onChange={(e) => setWsIpAllowlist(e.target.value)}
                 rows={3}
                 className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 placeholder="203.0.113.10, 203.0.113.0/24"
@@ -181,9 +143,10 @@ export default async function SettingsPage() {
             <div className="flex items-center justify-end">
               <button
                 type="submit"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                disabled={updateWorkspaceMutation.isPending}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
               >
-                Save
+                {updateWorkspaceMutation.isPending ? "Saving..." : "Save"}
               </button>
             </div>
           </form>
@@ -192,37 +155,18 @@ export default async function SettingsPage() {
         <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
           <h3 className="text-sm font-semibold tracking-tight">AI Provider</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Choose your AI provider and enter your API key. Use your own OpenAI, Anthropic, or Google subscription.
+            Choose your AI provider and enter your API key.
           </p>
 
-          {active ? (
-            <div className="mt-4 rounded-xl border border-border bg-background p-3">
-              <p className="text-xs text-muted-foreground">
-                Active: <span className="font-medium text-foreground">{providerLabels[active.provider]}</span>
-                {active.source === "env" ? (
-                  <span className="ml-1 text-muted-foreground">(from environment variable)</span>
-                ) : (
-                  <span className="ml-1 text-muted-foreground">(workspace config)</span>
-                )}
-              </p>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-destructive/40 bg-destructive/10 p-3">
-              <p className="text-xs text-destructive">
-                No AI provider configured. AI features will not work until you add an API key.
-              </p>
-            </div>
-          )}
-
-          <form action={updateAIProvider} className="mt-6 space-y-4">
+          <form onSubmit={handleSaveAI} className="mt-6 space-y-4">
             <div className="space-y-2">
               <label htmlFor="aiProvider" className="text-sm font-medium">
                 Provider
               </label>
               <select
                 id="aiProvider"
-                name="aiProvider"
-                defaultValue={workspace?.aiProvider ?? "openai"}
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value)}
                 className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <option value="openai">OpenAI (GPT-4o)</option>
@@ -237,26 +181,22 @@ export default async function SettingsPage() {
               </label>
               <input
                 id="aiApiKey"
-                name="aiApiKey"
                 type="password"
+                value={aiApiKey}
+                onChange={(e) => setAiApiKey(e.target.value)}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                placeholder={maskedKey || "sk-... or key-..."}
+                placeholder="sk-... or key-..."
               />
               <p className="text-xs text-muted-foreground">
-                {maskedKey
-                  ? `Current key: ${maskedKey}. Leave blank to keep the existing key.`
-                  : "No key stored."}{" "}
-                You can also set keys via environment variables
-                (<code className="font-mono">OPENAI_API_KEY</code>,{" "}
-                <code className="font-mono">ANTHROPIC_API_KEY</code>,{" "}
-                <code className="font-mono">GOOGLE_API_KEY</code>).
+                Leave blank to keep the existing key. You can also set keys via environment variables.
               </p>
             </div>
 
             <div className="flex items-center justify-end">
               <button
                 type="submit"
-                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                disabled={updateWorkspaceMutation.isPending}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
               >
                 Save AI settings
               </button>
@@ -271,15 +211,15 @@ export default async function SettingsPage() {
           Your name appears in the header and audit logs.
         </p>
 
-        <form action={updateProfile} className="mt-6 grid gap-4 lg:grid-cols-2">
+        <form onSubmit={handleSaveProfile} className="mt-6 grid gap-4 lg:grid-cols-2">
           <div className="space-y-2">
             <label htmlFor="name" className="text-sm font-medium">
               Name
             </label>
             <input
               id="name"
-              name="name"
-              defaultValue={user?.name ?? ""}
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
               required
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             />
@@ -303,12 +243,18 @@ export default async function SettingsPage() {
           <div className="flex items-center justify-end lg:col-span-2">
             <button
               type="submit"
-              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              disabled={updateProfileMutation.isPending}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
             >
-              Save profile
+              {updateProfileMutation.isPending ? "Saving..." : "Save profile"}
             </button>
           </div>
         </form>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <TwoFactorSetup />
+        <SessionsList />
       </section>
     </div>
   );

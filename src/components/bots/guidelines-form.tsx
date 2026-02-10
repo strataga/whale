@@ -1,23 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+
+import { useToast } from "@/components/ui/toast";
 
 type ApiError = { error?: string };
 
 export function GuidelinesForm() {
-  const router = useRouter();
+  const { toast } = useToast();
   const [title, setTitle] = React.useState("");
   const [content, setContent] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setPending(true);
     setError(null);
-    setSuccess(false);
 
     try {
       const res = await fetch("/api/bots/guidelines", {
@@ -31,18 +30,21 @@ export function GuidelinesForm() {
         | null;
 
       if (!res.ok) {
-        setError(data?.error ?? "Failed to create guideline.");
+        const message = data?.error ?? "Failed to create guideline.";
+        setError(message);
+        toast(message, "error");
         setPending(false);
         return;
       }
 
-      setSuccess(true);
+      toast("Guideline created successfully.", "success");
       setTitle("");
       setContent("");
       setPending(false);
-      router.refresh();
     } catch {
-      setError("Network error. Please try again.");
+      const message = "Network error. Please try again.";
+      setError(message);
+      toast(message, "error");
       setPending(false);
     }
   }
@@ -93,15 +95,6 @@ export function GuidelinesForm() {
           role="alert"
         >
           {error}
-        </div>
-      ) : null}
-
-      {success ? (
-        <div
-          className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm text-emerald-200"
-          role="status"
-        >
-          Guideline created successfully.
         </div>
       ) : null}
 

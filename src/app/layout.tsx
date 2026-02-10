@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   description: "A self-hosted, AI-first project planner that integrates with OpenClaw bots.",
 };
 
+// Whale is a self-hosted control plane that depends on runtime configuration (Convex, auth, payments).
+// Avoid static prerendering at build-time.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{

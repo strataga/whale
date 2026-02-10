@@ -6,36 +6,31 @@ import { Ban } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
-
-type ApiError = { error?: string };
+import { useCRPC } from "@/lib/convex/crpc";
 
 export function RevokeBotButton({ botId }: { botId: string }) {
   const router = useRouter();
   const { toast } = useToast();
+  const crpc = useCRPC();
 
-  const [pending, setPending] = React.useState(false);
+  const removeMutation = crpc.bots.remove.useMutation();
+  const pending = removeMutation.isPending;
+
   const [error, setError] = React.useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   async function revoke() {
-    setPending(true);
     setError(null);
 
-    const res = await fetch(`/api/bots/${botId}`, { method: "DELETE" });
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      const message = data?.error ?? "Failed to revoke bot.";
+    try {
+      await removeMutation.mutateAsync({ id: botId });
+      toast("Bot revoked.", "success");
+      router.push("/dashboard/bots");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to revoke bot.";
       setError(message);
       toast(message, "error");
-      setPending(false);
-      return;
     }
-
-    setPending(false);
-    toast("Bot revoked.", "success");
-    router.push("/dashboard/bots");
-    router.refresh();
   }
 
   return (
@@ -48,7 +43,7 @@ export function RevokeBotButton({ botId }: { botId: string }) {
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-rose-400/30 bg-rose-400/10 px-4 text-sm font-semibold text-rose-200 hover:bg-rose-400/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Ban className="h-4 w-4" />
-        {pending ? "Revoking…" : "Revoke Bot"}
+        {pending ? "Revoking..." : "Revoke Bot"}
       </button>
 
       <ConfirmDialog

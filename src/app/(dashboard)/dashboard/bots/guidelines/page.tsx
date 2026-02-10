@@ -1,12 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+"use client";
+
 import Link from "next/link";
 
 import { GuidelinesForm } from "@/components/bots/guidelines-form";
-import { db } from "@/lib/db";
-import { botGuidelines } from "@/lib/db/schema";
-import { checkRole, requireAuthContext } from "@/lib/server/auth-context";
-
-export const runtime = "nodejs";
+import { useCRPC } from "@/lib/convex/crpc";
 
 function formatDate(ts: number): string {
   return new Date(ts).toLocaleDateString("en-US", {
@@ -21,12 +18,23 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + "...";
 }
 
-export default async function BotGuidelinesPage() {
-  const ctx = await requireAuthContext();
-  const roleCheck = checkRole(ctx, "admin");
-  const isAdmin = !roleCheck;
+export default function BotGuidelinesPage() {
+  const crpc = useCRPC();
+  const guidelinesQuery = crpc.botGuidelines.list.useQuery({});
+  const meQuery = crpc.users.me.useQuery({});
 
-  if (roleCheck) {
+  if (guidelinesQuery.isPending || meQuery.isPending) {
+    return (
+      <div className="space-y-8">
+        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+        <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+      </div>
+    );
+  }
+
+  const isAdmin = meQuery.data?.role === "admin";
+
+  if (!isAdmin) {
     return (
       <div className="space-y-6">
         <div>
@@ -41,12 +49,7 @@ export default async function BotGuidelinesPage() {
     );
   }
 
-  const guidelines = db
-    .select()
-    .from(botGuidelines)
-    .where(eq(botGuidelines.workspaceId, ctx.workspaceId))
-    .orderBy(desc(botGuidelines.createdAt))
-    .all();
+  const guidelines = guidelinesQuery.data ?? [];
 
   return (
     <div className="space-y-8">
@@ -92,7 +95,7 @@ export default async function BotGuidelinesPage() {
           <div className="grid gap-4">
             {guidelines.map((g) => (
               <div
-                key={g.id}
+                key={g._id}
                 className="rounded-2xl border border-border bg-card p-5 shadow-sm"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -109,7 +112,7 @@ export default async function BotGuidelinesPage() {
                   </span>
                 </div>
                 <div className="mt-4 text-xs text-muted-foreground">
-                  Created {formatDate(g.createdAt)}
+                  Created {formatDate(g._creationTime)}
                 </div>
               </div>
             ))}

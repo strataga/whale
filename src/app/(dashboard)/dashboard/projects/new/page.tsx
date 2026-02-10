@@ -4,6 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 
+import { useCRPC } from "@/lib/convex/crpc";
+
 type Mode = "manual" | "ai";
 
 type ApiError = { error?: string };
@@ -23,6 +25,11 @@ type GeneratedPlan = {
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const crpc = useCRPC();
+
+  const createProjectMutation = crpc.projects.create.useMutation();
+  const createMilestoneMutation = crpc.milestones.create.useMutation();
+  const createTaskMutation = crpc.tasks.create.useMutation();
 
   const [mode, setMode] = React.useState<Mode>("manual");
 
@@ -35,29 +42,11 @@ export default function NewProjectPage() {
   const [error, setError] = React.useState<string | null>(null);
 
   async function createProject(payload: { name: string; description?: string }) {
-    const res = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+    const projectId = await createProjectMutation.mutateAsync({
+      name: payload.name,
+      description: payload.description,
     });
-
-    const data = (await res.json().catch(() => null)) as
-      | { project?: { id: string } }
-      | { id?: string }
-      | ApiError
-      | null;
-
-    if (!res.ok) {
-      throw new Error((data as ApiError | null)?.error ?? "Failed to create project.");
-    }
-
-    const projectId =
-      (data && "project" in data && data.project?.id) ||
-      (data && "id" in data && data.id) ||
-      null;
-
     if (!projectId) throw new Error("Project created but no id returned.");
-
     return projectId;
   }
 
@@ -114,61 +103,22 @@ export default function NewProjectPage() {
       const milestones = plan.milestones ?? [];
 
       for (const m of milestones) {
-        const milestonePayload: { name: string; dueDate?: number } = {
+        const milestonePayload: { projectId: string; name: string; dueDate?: number } = {
+          projectId: projectId as string,
           name: m.name,
         };
         if (m.dueDate) milestonePayload.dueDate = m.dueDate;
 
-        const mRes = await fetch(`/api/projects/${projectId}/milestones`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(milestonePayload),
-        });
-
-        const mData = (await mRes.json().catch(() => null)) as
-          | { milestone?: { id: string } }
-          | { id?: string }
-          | ApiError
-          | null;
-
-        if (!mRes.ok) {
-          throw new Error(
-            (mData as ApiError | null)?.error ?? `Failed to create milestone: ${m.name}`,
-          );
-        }
-
-        const milestoneId =
-          (mData && "milestone" in mData && mData.milestone?.id) ||
-          (mData && "id" in mData && mData.id) ||
-          null;
+        const milestoneId = await createMilestoneMutation.mutateAsync(milestonePayload);
 
         for (const t of m.tasks ?? []) {
-          const taskPayload: {
-            title: string;
-            description?: string;
-            priority?: string;
-            milestoneId?: string;
-          } = {
+          await createTaskMutation.mutateAsync({
+            projectId: projectId as string,
             title: t.title,
             description: t.description ?? "",
-            priority: t.priority ?? "medium",
-          };
-
-          if (milestoneId) taskPayload.milestoneId = milestoneId;
-
-          const tRes = await fetch(`/api/projects/${projectId}/tasks`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(taskPayload),
+            priority: (t.priority as "low" | "medium" | "high" | "urgent") ?? "medium",
+            milestoneId: milestoneId as string,
           });
-
-          const tData = (await tRes.json().catch(() => null)) as ApiError | null;
-
-          if (!tRes.ok) {
-            throw new Error(
-              tData?.error ?? `Failed to create task: ${t.title}`,
-            );
-          }
         }
       }
 
@@ -266,7 +216,7 @@ export default function NewProjectPage() {
               aria-busy={pending}
               className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending ? "Creating…" : "Create project"}
+              {pending ? "Creating\u2026" : "Create project"}
             </button>
           </div>
         </form>
@@ -288,7 +238,7 @@ export default function NewProjectPage() {
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                placeholder="Describe what you want to achieve, constraints, and an ideal timeline…"
+                placeholder="Describe what you want to achieve, constraints, and an ideal timeline\u2026"
               />
               <p className="text-xs text-muted-foreground">
                 Whale will call <code className="font-mono">/api/ai/generate-plan</code> to
@@ -306,7 +256,7 @@ export default function NewProjectPage() {
                 <span className="mr-2 inline-flex items-center">
                   <Sparkles className="h-4 w-4" />
                 </span>
-                {pending ? "Generating…" : "Generate plan"}
+                {pending ? "Generating\u2026" : "Generate plan"}
               </button>
             </div>
           </form>
@@ -328,7 +278,7 @@ export default function NewProjectPage() {
                   disabled={pending}
                   className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {pending ? "Creating…" : "Create project"}
+                  {pending ? "Creating\u2026" : "Create project"}
                 </button>
               </div>
 

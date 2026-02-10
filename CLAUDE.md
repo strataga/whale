@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Whale is a self-hosted, multi-user, AI-first project planner that integrates with OpenClaw bots. It converts natural-language goals into structured plans (milestones, tasks, daily priorities) and can delegate work to OpenClaw bots running locally or on remote hosts. Whale is the **source of truth** for projects and tasks; bots are execution endpoints.
+Whale is a **self-hosted, AI-first agent orchestration hub**. It converts natural-language goals into structured plans, delegates work to autonomous agents (local bots or external A2A peers), and settles payments via x402 micropayments or Stripe. Project planning is one vertical built on top of the agent substrate.
+
+**Scale:** 189 API routes | 85 DB tables | 36+ pages | 577 tests | 105+ Zod schemas
 
 ## Commands
 
@@ -32,25 +34,17 @@ pnpm exec tsc --noEmit  # TypeScript check without emit
 ```
 src/
 ├── app/
-│   ├── (auth)/          # Login + register (unauthenticated routes)
-│   ├── (dashboard)/     # All authenticated routes under /dashboard
-│   │   └── dashboard/   # Projects, settings, daily plan pages
-│   └── api/
-│       ├── auth/        # NextAuth handlers + register endpoint
-│       ├── projects/    # CRUD: projects, milestones, tasks
-│       └── ai/          # generate-plan, daily-plan, replan
-├── components/
-│   ├── ai/              # Plan review, daily plan display
-│   ├── layout/          # Sidebar, header
-│   ├── projects/        # Project card, milestone form, replan button
-│   └── tasks/           # Task card, add task form
+│   ├── (auth)/           # Login + register (unauthenticated)
+│   ├── (dashboard)/      # All authenticated routes under /dashboard
+│   ├── api/              # 189 route handlers (projects, bots, agents, ai, commerce, cron, ...)
+│   └── .well-known/      # A2A Agent Card endpoint
+├── components/           # 54+ React components (layout, tasks, bots, commerce, ui)
 ├── lib/
-│   ├── db/              # Drizzle schema, connection, migration
-│   ├── auth.ts          # NextAuth config (credentials + JWT)
-│   ├── ai.ts            # Vercel AI SDK provider setup + Zod output schemas
-│   ├── validators.ts    # Zod input validation schemas
-│   └── server/          # Auth context helper
-└── types/               # Drizzle-inferred types + NextAuth augmentation
+│   ├── db/schema.ts      # 85 tables (2142 lines) — Drizzle ORM
+│   ├── server/           # 35+ server modules (auth, engines, agents, payments, infra)
+│   ├── validators.ts     # ~105 Zod schemas
+│   └── auth.ts, ai.ts, crypto.ts, rate-limit.ts, ...
+└── types/                # A2A, AP2, Drizzle-inferred types
 ```
 
 ## Key Patterns
@@ -63,7 +57,10 @@ src/
 
 ## Data Model
 
-Workspace → Users (Admin/Member/Viewer) → Projects → Milestones → Tasks. AuditLog tracks mutations. Schema in `src/lib/db/schema.ts`. See `docs/PRD.md` §8 for full spec.
+Core: Workspace → Users → Projects → Milestones → Tasks → BotTasks.
+Agent layer: Agents (wraps bots + external peers) → AgentSkills → AgentProducts.
+Commerce: CheckoutSessions → Orders → PaymentProviders. x402Transactions, PaymentMandates (AP2).
+Schema in `src/lib/db/schema.ts` (85 tables). Full map in `docs/CODEBASE_MAP.md`.
 
 ## Repo Conventions
 
@@ -72,13 +69,14 @@ Workspace → Users (Admin/Member/Viewer) → Projects → Milestones → Tasks.
 - Typed APIs and explicit Zod schemas
 - Security first: no hardcoded secrets, auth on all API routes
 
-## MVP Milestones
+## Milestones
 
-- **M1** (DONE): Core planner — auth, project intake, tasks + milestones, daily plan, AI integration
-- **M2**: Bot integration — pairing flow, task assignment, result collection
-- **M3**: Security hardening — encryption at rest, audit logs
-- **M4**: Reporting — daily summaries, activity logs
+- **M1-M4** (DONE): Core planner, bot integration, security hardening, reporting
+- **Round 1** (DONE): 50 items — advanced bot management, AI intelligence, observability
+- **Round 2** (DONE): 50 items — workflow/rule/escalation engines, team productivity, 2FA, integrations
+- **Round 3** (DONE): 50 items — advanced bot orchestration, fleet management, pipeline templates
+- **Round 4** (DONE): 48 items — Agentic Economy Hub (A2A, x402, AP2, ACP, MCP, agent registry, commerce)
 
 ## Codebase Map
 
-For architecture diagrams, data model ERD, and user flow diagrams, see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md).
+For full architecture diagrams, 85-table ERD, server module guide, API surface (189 routes), UI navigation map, protocol stack, gotchas, and conventions, see [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md).

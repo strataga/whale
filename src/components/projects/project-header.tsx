@@ -6,9 +6,8 @@ import { Trash2 } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
-
-type ApiError = { error?: string };
 
 function statusStyles(status?: string | null) {
   switch (status) {
@@ -37,9 +36,14 @@ export function ProjectHeader({
 }) {
   const router = useRouter();
   const { toast } = useToast();
+  const crpc = useCRPC();
+
+  const updateMutation = crpc.projects.update.useMutation();
+  const removeMutation = crpc.projects.remove.useMutation();
+
+  const pending = updateMutation.isPending || removeMutation.isPending;
 
   const [editing, setEditing] = React.useState(false);
-  const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false);
 
@@ -54,53 +58,36 @@ export function ProjectHeader({
   }, [description, name, status]);
 
   async function save() {
-    setPending(true);
     setError(null);
 
-    const res = await fetch(`/api/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await updateMutation.mutateAsync({
+        id: projectId,
         name: draftName,
         description: draftDescription,
-        status: draftStatus,
-      }),
-    });
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      setError(data?.error ?? "Failed to update project.");
-      setPending(false);
-      return;
+        status: draftStatus as "draft" | "active" | "completed" | "archived",
+      });
+      setEditing(false);
+      toast("Project updated.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to update project.";
+      setError(message);
+      toast(message, "error");
     }
-
-    setPending(false);
-    setEditing(false);
-    router.refresh();
   }
 
   async function deleteProject() {
-    setPending(true);
     setError(null);
 
-    const res = await fetch(`/api/projects/${projectId}`, {
-      method: "DELETE",
-    });
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as ApiError | null;
-      const message = data?.error ?? "Failed to delete project.";
+    try {
+      await removeMutation.mutateAsync({ id: projectId });
+      toast("Project deleted.", "success");
+      router.push("/dashboard/projects");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to delete project.";
       setError(message);
       toast(message, "error");
-      setPending(false);
-      return;
     }
-
-    setPending(false);
-    toast("Project deleted.", "success");
-    router.push("/dashboard/projects");
-    router.refresh();
   }
 
   return (
@@ -236,7 +223,7 @@ export function ProjectHeader({
               aria-busy={pending}
               className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {pending ? "Saving…" : "Save"}
+              {pending ? "Saving\u2026" : "Save"}
             </button>
           </div>
         </div>

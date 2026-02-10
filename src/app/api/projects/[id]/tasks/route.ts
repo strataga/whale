@@ -76,10 +76,25 @@ export async function POST(
         priority: data.priority ?? "medium",
         assigneeId: null,
         dueDate: data.dueDate ?? null,
+        estimatedMinutes: data.estimatedMinutes ?? null,
         tags: JSON.stringify([]),
         position,
       })
       .run();
+
+    // If created from template, auto-add subtasks
+    if (data.templateId) {
+      const { taskTemplates, subtasks: subtasksTable } = await import("@/lib/db/schema");
+      const tpl = db.select().from(taskTemplates).where(eq(taskTemplates.id, data.templateId)).get();
+      if (tpl) {
+        const titles: string[] = JSON.parse(tpl.subtaskTitles || "[]");
+        for (let i = 0; i < titles.length; i++) {
+          db.insert(subtasksTable)
+            .values({ id: crypto.randomUUID(), taskId: id, title: titles[i]!, position: i })
+            .run();
+        }
+      }
+    }
 
     const task = db.select().from(tasks).where(eq(tasks.id, id)).get();
 

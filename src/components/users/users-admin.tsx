@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Copy, Trash2, UserPlus, X } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
+import { useCRPC } from "@/lib/convex/crpc";
 
 type ApiError = { error?: string };
 
@@ -23,7 +24,7 @@ type InviteResponse = {
 
 function formatJoined(ts: number) {
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "\u2014";
   return d.toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",
@@ -44,8 +45,11 @@ export function UsersAdmin({
   currentUserId: string;
   users: WorkspaceUser[];
 }) {
-  const router = useRouter();
+  const { toast } = useToast();
+  const crpc = useCRPC();
   const uid = React.useId();
+
+  const updateRoleMutation = crpc.users.updateRole.useMutation();
 
   const [error, setError] = React.useState<string | null>(null);
 
@@ -66,9 +70,6 @@ export function UsersAdmin({
 
   const [copyOk, setCopyOk] = React.useState(false);
 
-  const [updatingRoleUserId, setUpdatingRoleUserId] = React.useState<
-    string | null
-  >(null);
   const [removingUserId, setRemovingUserId] = React.useState<string | null>(
     null,
   );
@@ -109,7 +110,9 @@ export function UsersAdmin({
       | null;
 
     if (!res.ok) {
-      setError(data?.error ?? "Failed to invite user.");
+      const message = data?.error ?? "Failed to invite user.";
+      setError(message);
+      toast(message, "error");
       setInvitePending(false);
       return;
     }
@@ -126,29 +129,23 @@ export function UsersAdmin({
     setInviteEmail("");
     setInviteName("");
     setInviteRole("member");
-    router.refresh();
+    toast("User invited.", "success");
   }
 
   async function updateRole(targetUserId: string, nextRole: string) {
-    setUpdatingRoleUserId(targetUserId);
     setError(null);
 
-    const res = await fetch(`/api/users/${targetUserId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: nextRole }),
-    });
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      setError(data?.error ?? "Failed to update role.");
-      setUpdatingRoleUserId(null);
-      return;
+    try {
+      await updateRoleMutation.mutateAsync({
+        userId: targetUserId,
+        role: nextRole as "admin" | "member",
+      });
+      toast("Role updated.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to update role.";
+      setError(message);
+      toast(message, "error");
     }
-
-    setUpdatingRoleUserId(null);
-    router.refresh();
   }
 
   async function removeUser(targetUserId: string) {
@@ -159,13 +156,15 @@ export function UsersAdmin({
     const data = (await res.json().catch(() => null)) as ApiError | null;
 
     if (!res.ok) {
-      setError(data?.error ?? "Failed to remove user.");
+      const message = data?.error ?? "Failed to remove user.";
+      setError(message);
+      toast(message, "error");
       setRemovingUserId(null);
       return;
     }
 
     setRemovingUserId(null);
-    router.refresh();
+    toast("User removed.", "success");
   }
 
   return (
@@ -319,7 +318,7 @@ export function UsersAdmin({
                 className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <UserPlus className="h-4 w-4" />
-                {invitePending ? "Inviting…" : "Invite"}
+                {invitePending ? "Inviting..." : "Invite"}
               </button>
             </div>
           </form>
@@ -342,7 +341,7 @@ export function UsersAdmin({
                   const isSelf = user.id === currentUserId;
                   const busy =
                     invitePending ||
-                    updatingRoleUserId === user.id ||
+                    updateRoleMutation.isPending ||
                     removingUserId === user.id;
 
                   return (
@@ -352,7 +351,7 @@ export function UsersAdmin({
                     >
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold text-foreground">
-                          {user.name?.trim() ? user.name : "—"}
+                          {user.name?.trim() ? user.name : "\u2014"}
                         </div>
                         <div className="truncate text-xs text-muted-foreground">
                           {user.email}
@@ -406,7 +405,7 @@ export function UsersAdmin({
                             className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <Trash2 className="h-4 w-4" />
-                            {removingUserId === user.id ? "Removing…" : "Remove"}
+                            {removingUserId === user.id ? "Removing..." : "Remove"}
                           </button>
                         )}
                       </div>
@@ -447,4 +446,3 @@ export function UsersAdmin({
     </div>
   );
 }
-

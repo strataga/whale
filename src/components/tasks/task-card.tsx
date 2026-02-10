@@ -1,21 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { BotTaskStatus } from "@/components/bots/bot-task-status";
 import { AssignBotDropdown } from "@/components/tasks/assign-bot-dropdown";
 import { useToast } from "@/components/ui/toast";
-import type { Task } from "@/types";
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
 
 type TaskBotAssignment =
   | {
-      id: string;
+      _id: string;
       status: string;
       botName?: string | null;
-      bot?: { id: string; name: string } | null;
+      bot?: { _id: string; name: string } | null;
     }
   | null
   | undefined;
@@ -41,21 +41,33 @@ export function TaskCard({
   canAssignBot = false,
 }: {
   projectId: string;
-  task: Pick<
-    Task,
-    "id" | "title" | "description" | "status" | "priority" | "assigneeId"
-  > & {
+  task: {
+    _id: string;
+    title: string;
+    description?: string | null;
+    status?: string | null;
+    priority?: string | null;
+    assigneeId?: string | null;
     botTask?: TaskBotAssignment;
+    dueDate?: number | null;
+    estimatedMinutes?: number | null;
+    subtasksDone?: number;
+    subtasksTotal?: number;
+    isBlocked?: boolean;
   };
   showDelete?: boolean;
   canAssignBot?: boolean;
 }) {
-  const router = useRouter();
   const { toast } = useToast();
+  const crpc = useCRPC();
+  const updateMutation = crpc.tasks.update.useMutation();
+  const removeMutation = crpc.tasks.remove.useMutation();
 
-  const [pending, setPending] = React.useState(false);
+  const [now] = React.useState(() => Date.now());
   const [error, setError] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState(false);
+
+  const pending = updateMutation.isPending || removeMutation.isPending;
 
   const [draftTitle, setDraftTitle] = React.useState(task.title);
   const [draftDescription, setDraftDescription] = React.useState(task.description ?? "");
@@ -67,37 +79,24 @@ export function TaskCard({
     setDraftPriority(task.priority ?? "medium");
   }, [task.title, task.description, task.priority]);
 
-  async function updateTask(patch: Partial<Task>) {
-    setPending(true);
+  async function updateTask(patch: Record<string, any>) {
     setError(null);
-
-    const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-      const message = data?.error ?? "Update failed.";
+    try {
+      await updateMutation.mutateAsync({ id: task._id, ...patch });
+      return true;
+    } catch (err: any) {
+      const message = err?.message ?? "Update failed.";
       setError(message);
       toast(message, "error");
-      setPending(false);
       return false;
     }
-
-    setPending(false);
-    router.refresh();
-    return true;
   }
 
   async function saveEdit() {
     const ok = await updateTask({
       title: draftTitle,
       description: draftDescription,
-      priority: draftPriority as Task["priority"],
+      priority: draftPriority,
     });
     if (ok) {
       toast("Task saved.", "success");
@@ -109,27 +108,15 @@ export function TaskCard({
     const ok = confirm("Delete this task?");
     if (!ok) return;
 
-    setPending(true);
     setError(null);
-
-    const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
-      method: "DELETE",
-    });
-
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-      const message = data?.error ?? "Delete failed.";
+    try {
+      await removeMutation.mutateAsync({ id: task._id });
+      toast("Task deleted.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Delete failed.";
       setError(message);
       toast(message, "error");
-      setPending(false);
-      return;
     }
-
-    setPending(false);
-    toast("Task deleted.", "success");
-    router.refresh();
   }
 
   return (
@@ -137,9 +124,12 @@ export function TaskCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="truncate text-sm font-semibold text-foreground">
+            <Link
+              href={`/dashboard/projects/${projectId}/tasks/${task._id}`}
+              className="truncate text-sm font-semibold text-foreground hover:underline"
+            >
               {task.title}
-            </div>
+            </Link>
             <span
               className={cn(
                 "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
@@ -148,6 +138,16 @@ export function TaskCard({
             >
               {task.priority ?? "low"}
             </span>
+            {task.dueDate && task.status !== "done" && task.dueDate < now ? (
+              <span className="rounded-full border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[11px] font-semibold text-rose-300">
+                Overdue
+              </span>
+            ) : null}
+            {task.isBlocked ? (
+              <span className="rounded-full border border-yellow-400/30 bg-yellow-400/10 px-2 py-0.5 text-[11px] font-semibold text-yellow-300">
+                Blocked
+              </span>
+            ) : null}
           </div>
 
           {task.description ? (
@@ -156,13 +156,23 @@ export function TaskCard({
             </div>
           ) : null}
 
-          <div className="mt-2 text-xs text-muted-foreground">
-            Assignee:{" "}
-            {task.assigneeId ? (
-              <span className="text-foreground">{task.assigneeId}</span>
-            ) : (
-              <span>Unassigned</span>
-            )}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <span>
+              Assignee:{" "}
+              {task.assigneeId ? (
+                <span className="text-foreground">{task.assigneeId}</span>
+              ) : (
+                <span>Unassigned</span>
+              )}
+            </span>
+            {task.subtasksTotal ? (
+              <span className="text-foreground">
+                {task.subtasksDone ?? 0}/{task.subtasksTotal} subtasks
+              </span>
+            ) : null}
+            {task.estimatedMinutes ? (
+              <span>~{task.estimatedMinutes}m</span>
+            ) : null}
           </div>
 
           {task.botTask ? (
@@ -182,16 +192,16 @@ export function TaskCard({
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {!task.botTask && canAssignBot ? (
-            <AssignBotDropdown projectId={projectId} taskId={task.id} />
+            <AssignBotDropdown projectId={projectId} taskId={task._id} />
           ) : null}
 
-          <label className="sr-only" htmlFor={`task-status-${task.id}`}>
+          <label className="sr-only" htmlFor={`task-status-${task._id}`}>
             Status
           </label>
           <select
-            id={`task-status-${task.id}`}
+            id={`task-status-${task._id}`}
             value={task.status ?? "todo"}
-            onChange={(e) => updateTask({ status: e.target.value as Task["status"] })}
+            onChange={(e) => updateTask({ status: e.target.value })}
             disabled={pending}
             className="h-11 rounded-lg border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
           >
@@ -227,11 +237,11 @@ export function TaskCard({
       {editing ? (
         <div className="mt-4 space-y-3 rounded-xl border border-border bg-background p-3">
           <div className="space-y-1">
-            <label htmlFor={`task-title-${task.id}`} className="text-xs font-medium">
+            <label htmlFor={`task-title-${task._id}`} className="text-xs font-medium">
               Title
             </label>
             <input
-              id={`task-title-${task.id}`}
+              id={`task-title-${task._id}`}
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
@@ -239,11 +249,11 @@ export function TaskCard({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`task-desc-${task.id}`} className="text-xs font-medium">
+            <label htmlFor={`task-desc-${task._id}`} className="text-xs font-medium">
               Description
             </label>
             <textarea
-              id={`task-desc-${task.id}`}
+              id={`task-desc-${task._id}`}
               rows={3}
               value={draftDescription}
               onChange={(e) => setDraftDescription(e.target.value)}
@@ -252,11 +262,11 @@ export function TaskCard({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`task-priority-${task.id}`} className="text-xs font-medium">
+            <label htmlFor={`task-priority-${task._id}`} className="text-xs font-medium">
               Priority
             </label>
             <select
-              id={`task-priority-${task.id}`}
+              id={`task-priority-${task._id}`}
               value={draftPriority}
               onChange={(e) => setDraftPriority(e.target.value)}
               className="h-9 w-full rounded-lg border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"

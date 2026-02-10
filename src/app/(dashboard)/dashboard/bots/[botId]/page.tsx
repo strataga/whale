@@ -1,16 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { useParams } from "next/navigation";
 
 import { BotActivityLog } from "@/components/bots/bot-activity-log";
 import { BotTaskStatus } from "@/components/bots/bot-task-status";
 import { RevokeBotButton } from "@/components/bots/revoke-bot-button";
-import { db } from "@/lib/db";
-import { bots, botTasks, tasks } from "@/lib/db/schema";
-import { checkRole, requireAuthContext } from "@/lib/server/auth-context";
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
-
-export const runtime = "nodejs";
 
 function statusStyles(status?: string | null) {
   switch (status) {
@@ -67,85 +64,45 @@ function formatDateTime(ts?: number | null) {
   });
 }
 
-export default async function BotDetailPage({
-  params,
-}: {
-  params: Promise<{ botId: string }>;
-}) {
-  const { botId } = await params;
-  const ctx = await requireAuthContext();
-  const isAdmin = !checkRole(ctx, "admin");
+export default function BotDetailPage() {
+  const { botId } = useParams<{ botId: string }>();
+  const crpc = useCRPC();
 
-  // Mark stale active bots as offline
-  const staleStatuses = ["idle", "working", "waiting", "online", "busy"];
-  for (const s of staleStatuses) {
-    db.update(bots)
-      .set({
-        status: "offline",
-        statusReason: "Stale: no heartbeat",
-        statusChangedAt: sql`(strftime('%s','now') * 1000)`,
-        updatedAt: sql`(strftime('%s','now') * 1000)`,
-      })
-      .where(
-        and(
-          eq(bots.workspaceId, ctx.workspaceId),
-          eq(bots.status, s),
-          sql`${bots.lastSeenAt} < (strftime('%s','now') * 1000 - 5 * 60 * 1000)`,
-        ),
-      )
-      .run();
+  const botQuery = crpc.bots.get.useQuery({ id: botId });
+  const botTasksQuery = crpc.botTasks.listByBot.useQuery({ botId });
+  const meQuery = crpc.users.me.useQuery({});
+
+  if (botQuery.isPending || botTasksQuery.isPending || meQuery.isPending) {
+    return (
+      <div className="space-y-6">
+        <div className="h-6 w-24 animate-pulse rounded bg-muted" />
+        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+        <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+        <div className="h-64 animate-pulse rounded-2xl bg-muted" />
+      </div>
+    );
   }
 
-  const bot = db
-    .select({
-      id: bots.id,
-      name: bots.name,
-      host: bots.host,
-      status: bots.status,
-      statusReason: bots.statusReason,
-      capabilities: bots.capabilities,
-      lastSeenAt: bots.lastSeenAt,
-      version: bots.version,
-      onboardedAt: bots.onboardedAt,
-      currentBotTaskId: bots.currentBotTaskId,
-      createdAt: bots.createdAt,
-    })
-    .from(bots)
-    .where(and(eq(bots.id, botId), eq(bots.workspaceId, ctx.workspaceId)))
-    .get();
-
-  if (!bot) notFound();
-
-  // Look up current task title if bot is working on something
-  let currentTaskTitle: string | null = null;
-  if (bot.currentBotTaskId) {
-    const currentBotTask = db
-      .select({ taskTitle: tasks.title })
-      .from(botTasks)
-      .innerJoin(tasks, eq(botTasks.taskId, tasks.id))
-      .where(eq(botTasks.id, bot.currentBotTaskId))
-      .get();
-    currentTaskTitle = currentBotTask?.taskTitle ?? null;
+  const bot = botQuery.data;
+  if (!bot) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-10 text-center shadow-sm">
+        <h3 className="text-sm font-semibold">Bot not found</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          This bot does not exist or you do not have access.
+        </p>
+        <Link href="/dashboard/bots" className="mt-4 inline-block text-sm text-primary hover:underline">
+          Back to Bots
+        </Link>
+      </div>
+    );
   }
 
-  const recentBotTasks = db
-    .select({
-      id: botTasks.id,
-      status: botTasks.status,
-      outputSummary: botTasks.outputSummary,
-      createdAt: botTasks.createdAt,
-      taskId: tasks.id,
-      taskTitle: tasks.title,
-    })
-    .from(botTasks)
-    .innerJoin(tasks, eq(botTasks.taskId, tasks.id))
-    .where(eq(botTasks.botId, bot.id))
-    .orderBy(desc(botTasks.createdAt))
-    .limit(25)
-    .all();
+  const isAdmin = meQuery.data?.role === "admin";
+  const recentBotTasks = (botTasksQuery.data ?? []).slice(0, 25);
 
   const capabilities = parseCapabilities(bot.capabilities);
-  const registeredAt = formatDateTime(bot.createdAt);
+  const registeredAt = formatDateTime(bot._creationTime);
 
   return (
     <div className="space-y-6">
@@ -155,7 +112,7 @@ export default async function BotDetailPage({
             href="/dashboard/bots"
             className="text-sm font-medium text-muted-foreground hover:text-foreground"
           >
-            ← Bots
+            &larr; Bots
           </Link>
           <h2 className="mt-2 truncate text-2xl font-semibold tracking-tight">
             {bot.name}
@@ -165,7 +122,7 @@ export default async function BotDetailPage({
           </p>
         </div>
 
-        {isAdmin ? <RevokeBotButton botId={bot.id} /> : null}
+        {isAdmin ? <RevokeBotButton botId={bot._id} /> : null}
       </div>
 
       <section className="rounded-2xl border border-border bg-card p-6 shadow-sm">
@@ -186,11 +143,6 @@ export default async function BotDetailPage({
             >
               {bot.status ?? "offline"}
             </span>
-            {currentTaskTitle ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-blue-400/30 bg-blue-400/10 px-2 py-1 text-xs font-medium text-blue-200">
-                Working on: {currentTaskTitle}
-              </span>
-            ) : null}
             {bot.statusReason ? (
               <span className="text-xs text-muted-foreground">{bot.statusReason}</span>
             ) : null}
@@ -212,7 +164,7 @@ export default async function BotDetailPage({
               Registered
             </div>
             <div className="mt-2 text-sm text-foreground">
-              {registeredAt ?? "—"}
+              {registeredAt ?? "\u2014"}
             </div>
           </div>
         </div>
@@ -250,13 +202,13 @@ export default async function BotDetailPage({
           <div className="mt-5 space-y-3">
             {recentBotTasks.map((bt) => (
               <div
-                key={bt.id}
+                key={bt._id}
                 className="rounded-2xl border border-border bg-background p-4"
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-foreground">
-                      {bt.taskTitle}
+                      Task {bt.taskId ?? bt._id}
                     </div>
                     {bt.outputSummary ? (
                       <div className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
@@ -282,7 +234,7 @@ export default async function BotDetailPage({
         )}
       </section>
 
-      <BotActivityLog botId={bot.id} />
+      <BotActivityLog botId={bot._id} />
     </div>
   );
 }

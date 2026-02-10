@@ -1,21 +1,11 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+"use client";
+
+import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { db } from "@/lib/db";
-import { auditLogs, users } from "@/lib/db/schema";
-import { checkRole, requireAuthContext } from "@/lib/server/auth-context";
-
-export const runtime = "nodejs";
-
-function parsePositiveInt(value: string | undefined, fallback: number) {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return parsed;
-}
+import { useCRPC } from "@/lib/convex/crpc";
 
 function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim();
@@ -29,7 +19,7 @@ function safeJsonParse(raw: string): unknown {
 
 function formatDateTime(ts: number) {
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "\u2014";
   return d.toLocaleString(undefined, {
     year: "numeric",
     month: "short",
@@ -51,91 +41,97 @@ function metadataPreview(metadata: unknown) {
   })();
 
   const trimmed = serialized.trim();
-  if (!trimmed) return "—";
+  if (!trimmed) return "\u2014";
   if (trimmed.length <= 120) return trimmed;
   return `${trimmed.slice(0, 117)}...`;
 }
 
-type SearchParams = {
-  page?: string;
-  limit?: string;
-  action?: string;
-};
+const PAGE_SIZE = 50;
 
-export default async function AuditLogPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const ctx = await requireAuthContext();
-  const roleCheck = checkRole(ctx, "admin");
-  if (roleCheck) redirect("/dashboard");
+export default function AuditLogPage() {
+  const crpc = useCRPC();
+  const router = useRouter();
 
-  const sp = await searchParams;
+  const [filterAction, setFilterAction] = useState("");
+  const [appliedAction, setAppliedAction] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
-  const requestedPage = parsePositiveInt(sp.page, 1);
-  const requestedLimit = parsePositiveInt(sp.limit, 50);
-  const limit = Math.min(Math.max(requestedLimit, 1), 200);
+  const { data: me, isPending: mePending } = crpc.users.me.useQuery({});
+  const { data: rawLogs, isPending: logsPending } = crpc.auditLogs.list.useQuery({
+    action: appliedAction || undefined,
+    limit: 500,
+  });
+  const { data: usersList } = crpc.users.list.useQuery({});
 
-  const action = sp.action?.trim() || null;
+  const isAdmin = me?.role === "admin";
+  const isPending = mePending || logsPending;
 
-  const where = action
-    ? and(eq(auditLogs.workspaceId, ctx.workspaceId), eq(auditLogs.action, action))
-    : eq(auditLogs.workspaceId, ctx.workspaceId);
+  const userMap = useMemo(() => {
+    const map = new Map<string, { name: string | null; email: string }>();
+    if (!usersList) return map;
+    for (const u of usersList) {
+      map.set(u._id, { name: u.name ?? null, email: u.email });
+    }
+    return map;
+  }, [usersList]);
 
-  const totalRow = db
-    .select({ count: sql<number>`count(*)`.mapWith(Number) })
-    .from(auditLogs)
-    .where(where)
-    .get();
+  const entries = useMemo(() => {
+    if (!rawLogs) return [];
+    return rawLogs.map((row: any) => {
+      const user = row.userId ? userMap.get(row.userId as string) : null;
+      return {
+        id: row._id,
+        action: row.action,
+        createdAt: row._creationTime,
+        metadata: safeJsonParse(row.metadata ?? "{}"),
+        user: user
+          ? {
+              id: row.userId as string,
+              name: user.name,
+              email: user.email,
+            }
+          : null,
+      };
+    });
+  }, [rawLogs, userMap]);
 
-  const total = totalRow?.count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const page = Math.min(requestedPage, totalPages);
-  const offset = (page - 1) * limit;
+  const total = entries.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * PAGE_SIZE;
+  const pagedEntries = entries.slice(offset, offset + PAGE_SIZE);
 
-  const rows = db
-    .select({
-      id: auditLogs.id,
-      action: auditLogs.action,
-      metadata: auditLogs.metadata,
-      createdAt: auditLogs.createdAt,
-      userId: users.id,
-      userName: users.name,
-      userEmail: users.email,
-    })
-    .from(auditLogs)
-    .leftJoin(users, eq(auditLogs.userId, users.id))
-    .where(where)
-    .orderBy(desc(auditLogs.createdAt))
-    .limit(limit)
-    .offset(offset)
-    .all();
+  const canGoPrev = safePage > 1;
+  const canGoNext = safePage < totalPages;
 
-  const entries = rows.map((row) => ({
-    id: row.id,
-    action: row.action,
-    createdAt: row.createdAt,
-    metadata: safeJsonParse(row.metadata ?? "{}"),
-    user: row.userId
-      ? {
-          id: row.userId,
-          name: row.userName,
-          email: row.userEmail,
-        }
-      : null,
-  }));
-
-  function pageHref(nextPage: number) {
-    const params = new URLSearchParams();
-    params.set("page", String(nextPage));
-    params.set("limit", String(limit));
-    if (action) params.set("action", action);
-    return `/dashboard/audit-log?${params.toString()}`;
+  // Redirect non-admin users
+  if (!mePending && !isAdmin) {
+    router.push("/dashboard");
+    return null;
   }
 
-  const canGoPrev = page > 1;
-  const canGoNext = page < totalPages;
+  if (isPending) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight">Audit Log</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Security-relevant and planning events in this workspace.
+            </p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-[52px] animate-pulse rounded-xl border border-border bg-muted"
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -151,10 +147,7 @@ export default async function AuditLogPage({
         </div>
       </div>
 
-      <form
-        method="get"
-        className="rounded-2xl border border-border bg-card p-6 shadow-sm"
-      >
+      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <div className="space-y-2">
             <label htmlFor="action" className="text-sm font-medium">
@@ -162,8 +155,8 @@ export default async function AuditLogPage({
             </label>
             <input
               id="action"
-              name="action"
-              defaultValue={action ?? ""}
+              value={filterAction}
+              onChange={(e) => setFilterAction(e.target.value)}
               placeholder="project.create"
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             />
@@ -176,25 +169,32 @@ export default async function AuditLogPage({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <input type="hidden" name="page" value="1" />
-            <input type="hidden" name="limit" value={String(limit)} />
             <button
-              type="submit"
+              type="button"
+              onClick={() => {
+                setAppliedAction(filterAction.trim() || null);
+                setPage(1);
+              }}
               className="inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               Apply
             </button>
-            {action ? (
-              <Link
-                href="/dashboard/audit-log"
+            {appliedAction ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterAction("");
+                  setAppliedAction(null);
+                  setPage(1);
+                }}
                 className="inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-5 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 Clear
-              </Link>
+              </button>
             ) : null}
           </div>
         </div>
-      </form>
+      </div>
 
       <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
         <div className="overflow-x-auto">
@@ -207,9 +207,9 @@ export default async function AuditLogPage({
               <div className="sr-only">Expand</div>
             </div>
 
-            {entries.length ? (
+            {pagedEntries.length ? (
               <div className="divide-y divide-border">
-                {entries.map((entry) => {
+                {pagedEntries.map((entry: any) => {
                   const userLabel =
                     entry.user?.name?.trim() ||
                     entry.user?.email?.trim() ||
@@ -274,31 +274,33 @@ export default async function AuditLogPage({
 
         <div className="flex flex-col gap-3 border-t border-border px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            Page <span className="font-medium text-foreground">{page}</span> of{" "}
+            Page <span className="font-medium text-foreground">{safePage}</span> of{" "}
             <span className="font-medium text-foreground">{totalPages}</span>
           </p>
 
           <div className="flex items-center gap-2">
-            <Link
-              href={pageHref(Math.max(1, page - 1))}
-              aria-disabled={!canGoPrev}
+            <button
+              type="button"
+              disabled={!canGoPrev}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               className={cn(
                 "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 canGoPrev ? "hover:bg-muted" : "pointer-events-none opacity-50",
               )}
             >
               Prev
-            </Link>
-            <Link
-              href={pageHref(Math.min(totalPages, page + 1))}
-              aria-disabled={!canGoNext}
+            </button>
+            <button
+              type="button"
+              disabled={!canGoNext}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               className={cn(
                 "inline-flex min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 canGoNext ? "hover:bg-muted" : "pointer-events-none opacity-50",
               )}
             >
               Next
-            </Link>
+            </button>
           </div>
         </div>
       </section>

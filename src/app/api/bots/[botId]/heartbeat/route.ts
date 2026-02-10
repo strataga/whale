@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
 import { db } from "@/lib/db";
-import { bots } from "@/lib/db/schema";
-import { botHeartbeatSchema } from "@/lib/validators";
+import { bots, botMetrics, botSessions } from "@/lib/db/schema";
+import { botHeartbeatWithMetricsSchema } from "@/lib/validators";
 import { getBotAuthContext } from "@/lib/server/bot-auth";
 import { transitionBotStatus } from "@/lib/server/bot-state-machine";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -25,9 +26,15 @@ export async function POST(
     return jsonError(403, "Forbidden: cannot heartbeat for another bot");
   }
 
+  // #13 Rate-limit bot heartbeat (60 per minute per bot)
+  const rl = checkRateLimit(`heartbeat:${botId}`, { limit: 60, windowMs: 60_000 });
+  if (rl) {
+    return NextResponse.json({ error: rl.error }, { status: 429, headers: { "Retry-After": String(rl.retryAfter) } });
+  }
+
   try {
     const body = await req.json();
-    const data = botHeartbeatSchema.parse(body);
+    const data = botHeartbeatWithMetricsSchema.parse(body);
 
     // Fetch current bot status
     const bot = db
@@ -60,6 +67,33 @@ export async function POST(
       db.update(bots)
         .set({ version: data.version, updatedAt: now })
         .where(and(eq(bots.id, botId), eq(bots.workspaceId, botCtx.workspaceId)))
+        .run();
+    }
+
+    // #11 Store resource metrics if provided
+    if (data.metrics) {
+      db.insert(botMetrics)
+        .values({
+          id: crypto.randomUUID(),
+          botId,
+          cpuPercent: data.metrics.cpuPercent != null ? Math.round(data.metrics.cpuPercent) : null,
+          memoryMb: data.metrics.memoryMb != null ? Math.round(data.metrics.memoryMb) : null,
+          diskPercent: data.metrics.diskPercent != null ? Math.round(data.metrics.diskPercent) : null,
+          customMetrics: JSON.stringify(data.metrics.custom ?? {}),
+          createdAt: Date.now(),
+        })
+        .run();
+    }
+
+    // #46 Track bot sessions: if transitioning from offline → active, start a session
+    if (bot.status === "offline" && data.status !== "offline") {
+      db.insert(botSessions)
+        .values({
+          id: crypto.randomUUID(),
+          botId,
+          startedAt: Date.now(),
+          createdAt: Date.now(),
+        })
         .run();
     }
 

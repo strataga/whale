@@ -4,16 +4,28 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertTriangle,
   BarChart3,
   Bot,
+  ClipboardList,
+  Coins,
   FolderKanban,
+  Globe,
+  Handshake,
+  History,
   LayoutDashboard,
+  Network,
   ScrollText,
+  Server,
   Settings,
+  ShoppingCart,
+  UserCheck,
   Users,
   X,
+  Zap,
 } from "lucide-react";
 
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -22,49 +34,84 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const baseNavItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
-  { href: "/dashboard/bots", label: "Bots", icon: Bot },
-  { href: "/dashboard/reports", label: "Reporting", icon: BarChart3 },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
-];
+type NavSection = {
+  title: string;
+  accent?: boolean;
+  items: NavItem[];
+};
 
 export function Sidebar({
   open,
   setOpen,
-  userRole,
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
-  userRole?: string | null;
 }) {
   const pathname = usePathname();
-  const isAdmin = userRole === "admin";
+  const crpc = useCRPC();
+  const meQuery = crpc.users.me.useQuery({});
+  const isAdmin = meQuery.data?.role === "admin";
 
-  const navItems = React.useMemo(() => {
-    const items: NavItem[] = [];
-    const usersItem: NavItem = {
-      href: "/dashboard/users",
-      label: "Users",
-      icon: Users,
-    };
-    const auditLogItem: NavItem = {
-      href: "/dashboard/audit-log",
-      label: "Audit Log",
-      icon: ScrollText,
-    };
+  const sections = React.useMemo(() => {
+    const result: NavSection[] = [
+      {
+        title: "Overview",
+        items: [
+          { href: "/dashboard", label: "Mission Control", icon: LayoutDashboard },
+        ],
+      },
+      {
+        title: "Agents & Economy",
+        accent: true,
+        items: [
+          { href: "/dashboard/agents", label: "Agents", icon: Network },
+          { href: "/dashboard/economy", label: "Economy", icon: Coins },
+          { href: "/dashboard/commerce", label: "Commerce", icon: ShoppingCart },
+          ...(isAdmin
+            ? [{ href: "/dashboard/negotiations", label: "Negotiations", icon: Handshake }]
+            : []),
+        ],
+      },
+      {
+        title: "Projects",
+        items: [
+          { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
+          { href: "/dashboard/bots", label: "Bots", icon: Bot },
+          { href: "/dashboard/templates", label: "Templates", icon: ClipboardList },
+          { href: "/dashboard/retrospective", label: "Retrospective", icon: History },
+        ],
+      },
+      {
+        title: "Operations",
+        items: [
+          { href: "/dashboard/reports", label: "Reporting", icon: BarChart3 },
+          { href: "/dashboard/team", label: "Team", icon: UserCheck },
+          { href: "/dashboard/webhooks", label: "Webhooks", icon: Globe },
+          { href: "/dashboard/automation-rules", label: "Automation", icon: Zap },
+        ],
+      },
+    ];
 
-    // Insert Users + Audit Log between Bots and Settings (admin only).
-    for (const item of baseNavItems) {
-      if (item.href === "/dashboard/settings" && isAdmin) {
-        items.push(usersItem);
-        items.push(auditLogItem);
-      }
-      items.push(item);
+    if (isAdmin) {
+      result.push({
+        title: "Admin",
+        items: [
+          { href: "/dashboard/alerts", label: "Alerts", icon: AlertTriangle },
+          { href: "/dashboard/users", label: "Users", icon: Users },
+          { href: "/dashboard/admin/system", label: "System", icon: Server },
+          { href: "/dashboard/audit-log", label: "Audit Log", icon: ScrollText },
+        ],
+      });
     }
 
-    return items;
+    result.push({
+      title: "",
+      items: [
+        { href: "/dashboard/settings", label: "Settings", icon: Settings },
+      ],
+    });
+
+    return result;
   }, [isAdmin]);
 
   return (
@@ -85,8 +132,6 @@ export function Sidebar({
           "lg:translate-x-0",
         )}
         aria-label="Sidebar"
-        // When closed on mobile, prevent keyboard navigation into invisible sidebar.
-        // On lg+ the sidebar is always visible so this has no effect (CSS overrides translate).
         aria-hidden={!open ? true : undefined}
         tabIndex={!open ? -1 : undefined}
       >
@@ -97,7 +142,7 @@ export function Sidebar({
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold tracking-wide">Whale</div>
-              <div className="text-xs text-muted-foreground">Planner</div>
+              <div className="text-[10px] text-muted-foreground">Agent Hub</div>
             </div>
           </Link>
 
@@ -112,41 +157,64 @@ export function Sidebar({
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-2">
-          <ul className="space-y-1">
-            {navItems.map((item) => {
-              const isActive =
-                pathname === item.href ||
-                (item.href !== "/dashboard" &&
-                  pathname.startsWith(item.href + "/"));
+          {sections.map((section, sectionIdx) => (
+            <div key={section.title || `section-${sectionIdx}`}>
+              {/* Section divider (not before the first section) */}
+              {sectionIdx > 0 && section.title && (
+                <div className="mx-1 my-3 h-px bg-border" />
+              )}
 
-              const Icon = item.icon;
+              {/* Section header */}
+              {section.title && (
+                <div
+                  className={cn(
+                    "mb-1 px-3 pt-1 text-[10px] font-semibold uppercase tracking-wider",
+                    section.accent
+                      ? "text-cyan-400/70"
+                      : "text-muted-foreground/60",
+                  )}
+                >
+                  {section.title}
+                </div>
+              )}
 
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                      isActive
-                        ? "bg-muted text-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                    aria-current={isActive ? "page" : undefined}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+              <ul className="space-y-0.5">
+                {section.items.map((item) => {
+                  const isActive =
+                    pathname === item.href ||
+                    (item.href !== "/dashboard" &&
+                      pathname.startsWith(item.href + "/"));
+
+                  const Icon = item.icon;
+
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          "flex min-h-[40px] items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                          isActive
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                        aria-current={isActive ? "page" : undefined}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
 
-        <div className="mt-auto px-4 pb-4 pt-6 text-xs text-muted-foreground">
+        <div className="mt-auto px-4 pb-4 pt-4 text-xs text-muted-foreground">
           <div className="rounded-xl border border-border bg-background p-3">
-            <div className="font-medium text-foreground">Tip</div>
+            <div className="font-medium text-foreground">Agent Hub</div>
             <div className="mt-1 leading-relaxed">
-              Try creating a project with an outcome, constraints, and a deadline.
+              Discover agents, negotiate tasks, and settle payments across protocols.
             </div>
           </div>
         </div>

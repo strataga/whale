@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 
 import { useToast } from "@/components/ui/toast";
@@ -9,7 +8,6 @@ import { useToast } from "@/components/ui/toast";
 type ApiError = { error?: string };
 
 export function ReplanButton({ projectId }: { projectId: string }) {
-  const router = useRouter();
   const { toast } = useToast();
 
   const [pending, setPending] = React.useState(false);
@@ -37,7 +35,6 @@ export function ReplanButton({ projectId }: { projectId: string }) {
 
     setPending(false);
     toast("Replan complete.", "success");
-    router.refresh();
   }
 
   return (
@@ -50,7 +47,7 @@ export function ReplanButton({ projectId }: { projectId: string }) {
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
       >
         <RefreshCw className="h-4 w-4 text-muted-foreground" />
-        {pending ? "Replanning…" : "Replan"}
+        {pending ? "Replanning\u2026" : "Replan"}
       </button>
 
       {error ? (

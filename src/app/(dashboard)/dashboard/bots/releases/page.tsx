@@ -1,12 +1,9 @@
+"use client";
+
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
 
 import { ReleaseForm } from "@/components/bots/release-form";
-import { db } from "@/lib/db";
-import { botReleaseNotes } from "@/lib/db/schema";
-import { checkRole, requireAuthContext } from "@/lib/server/auth-context";
-
-export const runtime = "nodejs";
+import { useCRPC } from "@/lib/convex/crpc";
 
 function formatDateTime(ts?: number | null) {
   if (!ts) return null;
@@ -21,16 +18,23 @@ function formatDateTime(ts?: number | null) {
   });
 }
 
-export default async function ReleasesPage() {
-  const ctx = await requireAuthContext();
-  const isAdmin = !checkRole(ctx, "admin");
+export default function ReleasesPage() {
+  const crpc = useCRPC();
+  const releasesQuery = crpc.botReleaseNotes.list.useQuery({});
+  const meQuery = crpc.users.me.useQuery({});
 
-  const releases = db
-    .select()
-    .from(botReleaseNotes)
-    .where(eq(botReleaseNotes.workspaceId, ctx.workspaceId))
-    .orderBy(desc(botReleaseNotes.createdAt))
-    .all();
+  if (releasesQuery.isPending || meQuery.isPending) {
+    return (
+      <div className="space-y-6">
+        <div className="h-6 w-24 animate-pulse rounded bg-muted" />
+        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+        <div className="h-48 animate-pulse rounded-2xl bg-muted" />
+      </div>
+    );
+  }
+
+  const isAdmin = meQuery.data?.role === "admin";
+  const releases = releasesQuery.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -75,7 +79,7 @@ export default async function ReleasesPage() {
           <div className="mt-5 space-y-3">
             {releases.map((release) => (
               <div
-                key={release.id}
+                key={release._id}
                 className="rounded-2xl border border-border bg-background p-4"
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -103,7 +107,7 @@ export default async function ReleasesPage() {
                     ) : null}
                   </div>
                   <div className="shrink-0 text-xs text-muted-foreground">
-                    {formatDateTime(release.createdAt) ?? "—"}
+                    {formatDateTime(release._creationTime) ?? "\u2014"}
                   </div>
                 </div>
               </div>

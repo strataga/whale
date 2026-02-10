@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { CheckCircle2, RefreshCw } from "lucide-react";
 
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
 
 type ApiError = { error?: string };
@@ -108,11 +108,14 @@ export default function DailyPlanClient({
   projectId: string;
   initialPlan: DailyPlan;
 }) {
-  const router = useRouter();
+  const crpc = useCRPC();
+  const updateMutation = crpc.tasks.update.useMutation();
 
   const [plan, setPlan] = React.useState<DailyPlan>(initialPlan);
-  const [pending, setPending] = React.useState(false);
+  const [aiPending, setAiPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const pending = aiPending || updateMutation.isPending;
 
   const doneIds = React.useMemo(() => {
     const ids = new Set<string>();
@@ -125,51 +128,34 @@ export default function DailyPlanClient({
   }, [plan.finishThis, plan.mustDo, plan.niceToDo]);
 
   async function regenerate() {
-    setPending(true);
+    setAiPending(true);
     setError(null);
 
-    const res = await fetch("/api/ai/daily-plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId }),
-    });
+    try {
+      const res = await fetch("/api/ai/daily-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
 
-    const data = (await res.json().catch(() => null)) as DailyPlan | ApiError | null;
+      const data = (await res.json().catch(() => null)) as DailyPlan | ApiError | null;
 
-    if (res.ok && data && "mustDo" in data && "niceToDo" in data && "finishThis" in data) {
-      setPlan(data as DailyPlan);
-      setPending(false);
-      return;
+      if (res.ok && data && "mustDo" in data && "niceToDo" in data && "finishThis" in data) {
+        setPlan(data as DailyPlan);
+      } else {
+        setError((data as ApiError | null)?.error ?? "AI daily plan not available.");
+      }
+    } catch {
+      setError("Failed to regenerate plan.");
+    } finally {
+      setAiPending(false);
     }
-
-    // Fallback: refresh server-rendered heuristic plan.
-    if (!res.ok) {
-      setError((data as ApiError | null)?.error ?? "AI daily plan not available.");
-    }
-
-    setPending(false);
-    router.refresh();
   }
 
   async function toggleDone(taskId: string, nextDone: boolean) {
-    setPending(true);
     setError(null);
 
-    const res = await fetch(`/api/projects/${projectId}/tasks/${taskId}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: nextDone ? "done" : "todo" }),
-    });
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      setError(data?.error ?? "Failed to update task.");
-      setPending(false);
-      return;
-    }
-
-    // Update local plan state optimistically, then refresh server data.
+    // Optimistic update
     setPlan((prev) => {
       const patchBucket = (bucket: PlanItem[]) =>
         bucket.map((t) =>
@@ -183,8 +169,11 @@ export default function DailyPlanClient({
       };
     });
 
-    setPending(false);
-    router.refresh();
+    try {
+      await updateMutation.mutateAsync({ id: taskId, status: nextDone ? "done" : "todo" });
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to update task.");
+    }
   }
 
   return (

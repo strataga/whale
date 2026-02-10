@@ -5,13 +5,13 @@ import { usePathname } from "next/navigation";
 
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { GlobalSearch } from "@/components/ui/global-search";
+import { KeyboardShortcutsOverlay } from "@/components/ui/keyboard-shortcuts";
 
 export default function DashboardShell({
   children,
-  userRole,
 }: {
   children: React.ReactNode;
-  userRole?: string | null;
 }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = React.useState(false);
@@ -33,7 +33,6 @@ export default function DashboardShell({
       <Sidebar
         open={sidebarOpen}
         setOpen={setSidebarOpen}
-        userRole={userRole}
       />
 
       <div className="lg:pl-72">
@@ -42,6 +41,9 @@ export default function DashboardShell({
           {children}
         </main>
       </div>
+
+      <GlobalSearch />
+      <KeyboardShortcutsOverlay />
     </div>
   );
 }

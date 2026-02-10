@@ -1,49 +1,44 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 
-type ApiError = { error?: string };
+import { useToast } from "@/components/ui/toast";
+import { useCRPC } from "@/lib/convex/crpc";
 
 export function AddMilestoneForm({ projectId }: { projectId: string }) {
-  const router = useRouter();
+  const { toast } = useToast();
+  const crpc = useCRPC();
+  const createMutation = crpc.milestones.create.useMutation();
   const uid = React.useId();
 
   const [open, setOpen] = React.useState(false);
-  const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const [name, setName] = React.useState("");
   const [dueDate, setDueDate] = React.useState("");
 
+  const pending = createMutation.isPending;
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
     setError(null);
 
-    const payload: { name: string; dueDate?: number } = { name };
-    if (dueDate) payload.dueDate = new Date(dueDate).getTime();
-
-    const res = await fetch(`/api/projects/${projectId}/milestones`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      setError(data?.error ?? "Failed to create milestone.");
-      setPending(false);
-      return;
+    try {
+      await createMutation.mutateAsync({
+        projectId,
+        name,
+        ...(dueDate ? { dueDate: new Date(dueDate).getTime() } : {}),
+      });
+      setOpen(false);
+      setName("");
+      setDueDate("");
+      toast("Milestone created.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to create milestone.";
+      setError(message);
+      toast(message, "error");
     }
-
-    setPending(false);
-    setOpen(false);
-    setName("");
-    setDueDate("");
-    router.refresh();
   }
 
   return (

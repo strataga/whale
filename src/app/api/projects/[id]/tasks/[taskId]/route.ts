@@ -64,6 +64,10 @@ export async function PATCH(
       next.tags = JSON.stringify(patch.tags ?? []);
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "recurrence")) {
+      next.recurrence = patch.recurrence ? JSON.stringify(patch.recurrence) : null;
+    }
+
     if (!Object.keys(next).length) {
       return jsonError(400, "No fields to update");
     }

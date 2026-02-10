@@ -1,30 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Bot } from "lucide-react";
 
 import { useToast } from "@/components/ui/toast";
-
-type ApiError = { error?: string };
-
-type BotLite = {
-  id: string;
-  name: string;
-  status?: string | null;
-};
-
-function normalizeBotsResponse(data: unknown): BotLite[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data as BotLite[];
-
-  if (typeof data === "object") {
-    const maybe = data as { bots?: unknown };
-    if (Array.isArray(maybe.bots)) return maybe.bots as BotLite[];
-  }
-
-  return [];
-}
+import { useCRPC } from "@/lib/convex/crpc";
 
 export function AssignBotDropdown({
   projectId,
@@ -35,75 +15,38 @@ export function AssignBotDropdown({
   taskId: string;
   disabled?: boolean;
 }) {
-  const router = useRouter();
   const { toast } = useToast();
   const uid = React.useId();
+  const crpc = useCRPC();
+
+  const botsQuery = crpc.bots.list.useQuery({});
+  const assignMutation = crpc.botTasks.assign.useMutation();
 
   const [open, setOpen] = React.useState(false);
-  const [loadingBots, setLoadingBots] = React.useState(false);
-  const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const [bots, setBots] = React.useState<BotLite[]>([]);
-
-  async function loadBots() {
-    setLoadingBots(true);
-    setError(null);
-
-    const res = await fetch("/api/bots", { method: "GET" });
-    const data = (await res.json().catch(() => null)) as
-      | (ApiError & unknown)
-      | null;
-
-    if (!res.ok) {
-      const message =
-        (data as ApiError | null)?.error ?? "Failed to load bots.";
-      setError(message);
-      toast(message, "error");
-      setLoadingBots(false);
-      return;
-    }
-
-    const all = normalizeBotsResponse(data);
-    const online = all.filter((b) => (b.status ?? "offline") === "online");
-    setBots(online);
-    setLoadingBots(false);
-  }
-
-  React.useEffect(() => {
-    if (!open) return;
-    void loadBots();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run only when dropdown opens
-  }, [open]);
+  const onlineBots = React.useMemo(() => {
+    if (!botsQuery.data) return [];
+    const staleBefore = Date.now() - 120_000;
+    return botsQuery.data.filter(
+      (b) => b.lastSeenAt && b.lastSeenAt > staleBefore && b.status !== "offline",
+    );
+  }, [botsQuery.data]);
 
   async function assignBot(botId: string) {
-    setPending(true);
     setError(null);
-
-    const res = await fetch(
-      `/api/projects/${projectId}/tasks/${taskId}/assign-bot`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ botId }),
-      },
-    );
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      const message = data?.error ?? "Failed to assign bot.";
+    try {
+      await assignMutation.mutateAsync({ botId, taskId });
+      setOpen(false);
+      toast("Bot assigned to task.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to assign bot.";
       setError(message);
       toast(message, "error");
-      setPending(false);
-      return;
     }
-
-    setPending(false);
-    setOpen(false);
-    toast("Bot assigned to task.", "success");
-    router.refresh();
   }
+
+  const pending = assignMutation.isPending;
 
   return (
     <div className="relative">
@@ -135,7 +78,7 @@ export function AssignBotDropdown({
             </label>
             <select
               id={`${uid}-bot`}
-              disabled={pending || loadingBots}
+              disabled={pending || botsQuery.isPending}
               defaultValue=""
               onChange={(e) => {
                 const botId = e.target.value;
@@ -145,10 +88,10 @@ export function AssignBotDropdown({
               className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-60"
             >
               <option value="" disabled>
-                {loadingBots ? "Loading…" : "Select a bot"}
+                {botsQuery.isPending ? "Loading\u2026" : "Select a bot"}
               </option>
-              {bots.map((b) => (
-                <option key={b.id} value={b.id}>
+              {onlineBots.map((b) => (
+                <option key={b._id} value={b._id}>
                   {b.name}
                 </option>
               ))}
@@ -159,7 +102,7 @@ export function AssignBotDropdown({
             </p>
           </div>
 
-          {loadingBots ? null : bots.length === 0 ? (
+          {!botsQuery.isPending && onlineBots.length === 0 ? (
             <div className="mt-4 rounded-xl border border-border bg-background p-3 text-sm text-muted-foreground">
               No online bots found.
             </div>

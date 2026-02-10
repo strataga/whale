@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 
-type ApiError = { error?: string };
+import { useToast } from "@/components/ui/toast";
+import { useCRPC } from "@/lib/convex/crpc";
 
 export function AddTaskForm({
   projectId,
@@ -13,51 +13,42 @@ export function AddTaskForm({
   projectId: string;
   milestoneId?: string | null;
 }) {
-  const router = useRouter();
+  const { toast } = useToast();
+  const crpc = useCRPC();
+  const createMutation = crpc.tasks.create.useMutation();
   const uid = React.useId();
 
   const [open, setOpen] = React.useState(false);
-  const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [priority, setPriority] = React.useState("medium");
 
+  const pending = createMutation.isPending;
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPending(true);
     setError(null);
 
-    const payload: {
-      title: string;
-      description?: string;
-      priority?: string;
-      milestoneId?: string;
-    } = { title, description, priority };
-
-    if (milestoneId) payload.milestoneId = milestoneId;
-
-    const res = await fetch(`/api/projects/${projectId}/tasks`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await res.json().catch(() => null)) as ApiError | null;
-
-    if (!res.ok) {
-      setError(data?.error ?? "Failed to create task.");
-      setPending(false);
-      return;
+    try {
+      await createMutation.mutateAsync({
+        projectId,
+        title,
+        description,
+        priority,
+        ...(milestoneId ? { milestoneId } : {}),
+      });
+      setOpen(false);
+      setTitle("");
+      setDescription("");
+      setPriority("medium");
+      toast("Task created.", "success");
+    } catch (err: any) {
+      const message = err?.message ?? "Failed to create task.";
+      setError(message);
+      toast(message, "error");
     }
-
-    setPending(false);
-    setOpen(false);
-    setTitle("");
-    setDescription("");
-    setPriority("medium");
-    router.refresh();
   }
 
   return (

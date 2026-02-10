@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 
+import { BulkActionsBar } from "@/components/tasks/bulk-actions-bar";
+import { useCRPC } from "@/lib/convex/crpc";
 import { cn } from "@/lib/utils";
 
 type TaskStatus = "todo" | "in_progress" | "done";
@@ -14,6 +15,8 @@ interface TaskItem {
   description: string;
   status: string;
   priority: string;
+  dueDate?: number | null;
+  isBlocked?: boolean;
 }
 
 interface TaskBoardProps {
@@ -50,9 +53,20 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 export function TaskBoard({ projectId, tasks }: TaskBoardProps) {
-  const router = useRouter();
+  const crpc = useCRPC();
+  const updateMutation = crpc.tasks.update.useMutation();
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  function toggleSelect(taskId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }
 
   const tasksByStatus = useCallback(
     (status: TaskStatus) => tasks.filter((t) => t.status === status),
@@ -107,27 +121,21 @@ export function TaskBoard({ projectId, tasks }: TaskBoardProps) {
     if (!task || task.status === newStatus) return;
 
     try {
-      const res = await fetch(
-        `/api/projects/${projectId}/tasks/${taskId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: newStatus }),
-        },
-      );
-
-      if (!res.ok) {
-        console.error("Failed to update task status");
-        return;
-      }
-
-      router.refresh();
+      await updateMutation.mutateAsync({ id: taskId, status: newStatus });
     } catch (err) {
       console.error("Failed to update task status", err);
     }
   }
 
   return (
+    <div className="space-y-3">
+      <BulkActionsBar
+        selectedIds={Array.from(selectedIds)}
+        onClear={() => setSelectedIds(new Set())}
+        onComplete={() => {
+          setSelectedIds(new Set());
+        }}
+      />
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       {COLUMNS.map((col) => {
         const columnTasks = tasksByStatus(col.key);
@@ -163,13 +171,35 @@ export function TaskBoard({ projectId, tasks }: TaskBoardProps) {
                   className={cn(
                     "cursor-grab rounded-xl border border-border bg-background p-3 shadow-sm transition-opacity active:cursor-grabbing",
                     draggingId === task.id && "opacity-50",
+                    selectedIds.has(task.id) && "ring-1 ring-primary",
                   )}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-sm font-medium text-foreground">
-                      {task.title}
-                    </span>
-                    <PriorityBadge priority={task.priority} />
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(task.id)}
+                        onChange={() => toggleSelect(task.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-3.5 w-3.5 rounded border-border accent-primary"
+                      />
+                      {task.isBlocked ? (
+                        <span className="text-yellow-400" title="Blocked">
+                          🔒
+                        </span>
+                      ) : null}
+                      <span className="text-sm font-medium text-foreground">
+                        {task.title}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {task.dueDate && task.status !== "done" && task.dueDate < Date.now() ? (
+                        <span className="rounded-full border border-rose-400/30 bg-rose-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300">
+                          Overdue
+                        </span>
+                      ) : null}
+                      <PriorityBadge priority={task.priority} />
+                    </div>
                   </div>
                   {task.description ? (
                     <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -190,6 +220,7 @@ export function TaskBoard({ projectId, tasks }: TaskBoardProps) {
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

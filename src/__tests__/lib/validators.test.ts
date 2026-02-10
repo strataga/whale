@@ -74,7 +74,7 @@ describe("registerSchema", () => {
   it("accepts valid registration", () => {
     const result = registerSchema.safeParse({
       email: "user@example.com",
-      password: "securepass123",
+      password: "SecureP@ss123",
       name: "John Doe",
     });
     expect(result.success).toBe(true);
@@ -83,7 +83,7 @@ describe("registerSchema", () => {
   it("rejects missing name", () => {
     const result = registerSchema.safeParse({
       email: "user@example.com",
-      password: "securepass123",
+      password: "SecureP@ss123",
     });
     expect(result.success).toBe(false);
   });
@@ -91,7 +91,7 @@ describe("registerSchema", () => {
   it("rejects empty name (after trim)", () => {
     const result = registerSchema.safeParse({
       email: "user@example.com",
-      password: "securepass123",
+      password: "SecureP@ss123",
       name: "   ",
     });
     expect(result.success).toBe(false);
@@ -100,7 +100,7 @@ describe("registerSchema", () => {
   it("rejects name too long (> 200 chars)", () => {
     const result = registerSchema.safeParse({
       email: "user@example.com",
-      password: "securepass123",
+      password: "SecureP@ss123",
       name: "a".repeat(201),
     });
     expect(result.success).toBe(false);
@@ -109,7 +109,7 @@ describe("registerSchema", () => {
   it("accepts name at exactly 200 chars", () => {
     const result = registerSchema.safeParse({
       email: "user@example.com",
-      password: "securepass123",
+      password: "SecureP@ss123",
       name: "a".repeat(200),
     });
     expect(result.success).toBe(true);

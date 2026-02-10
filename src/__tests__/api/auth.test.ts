@@ -16,7 +16,7 @@ describe("Auth — registerSchema validation", () => {
   it("accepts valid registration input", () => {
     const result = registerSchema.safeParse({
       email: "alice@example.com",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "Alice",
     });
     expect(result.success).toBe(true);
@@ -24,7 +24,7 @@ describe("Auth — registerSchema validation", () => {
 
   it("rejects missing email", () => {
     const result = registerSchema.safeParse({
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "Alice",
     });
     expect(result.success).toBe(false);
@@ -33,7 +33,7 @@ describe("Auth — registerSchema validation", () => {
   it("rejects invalid email format", () => {
     const result = registerSchema.safeParse({
       email: "not-an-email",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "Alice",
     });
     expect(result.success).toBe(false);
@@ -60,7 +60,7 @@ describe("Auth — registerSchema validation", () => {
   it("rejects empty name", () => {
     const result = registerSchema.safeParse({
       email: "alice@example.com",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "",
     });
     expect(result.success).toBe(false);
@@ -69,7 +69,7 @@ describe("Auth — registerSchema validation", () => {
   it("rejects name longer than 200 characters", () => {
     const result = registerSchema.safeParse({
       email: "alice@example.com",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "A".repeat(201),
     });
     expect(result.success).toBe(false);
@@ -78,7 +78,7 @@ describe("Auth — registerSchema validation", () => {
   it("trims name whitespace", () => {
     const result = registerSchema.safeParse({
       email: "alice@example.com",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
       name: "  Alice  ",
     });
     expect(result.success).toBe(true);
@@ -92,7 +92,7 @@ describe("Auth — loginSchema validation", () => {
   it("accepts valid login", () => {
     const result = loginSchema.safeParse({
       email: "alice@example.com",
-      password: "strongPassword1",
+      password: "StrongP@ss1",
     });
     expect(result.success).toBe(true);
   });
